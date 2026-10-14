@@ -1,0 +1,270 @@
+/* Hubzone Weightlifting e-Dziennik — panel trenera */
+(function(){
+"use strict";
+const { el, S, toast } = HZ;
+const app = document.getElementById("app");
+const A = { session:null, profile:null, checked:false, authMode:"login", tab:HZ.LS.get("hz-admin-tab") || "workouts",
+  clients:[], stats:{}, editW:null, editC:null, confirmDel:null, res:{ wid:null, rows:null, loading:false }, clientId:null, clientLogs:null, joinCode:undefined, error:null };
+
+function render(){ const y = window.scrollY; app.replaceChildren(...view()); window.scrollTo(0, y); }
+
+async function loadAll(){
+  try {
+    const pr = await HZ.sb.from("profiles").select("*").eq("id", A.session.user.id).single();
+    if (pr.error) throw pr.error;
+    A.profile = pr.data; A.checked = true;
+    if (!A.profile.is_admin){ render(); return; }
+    await Promise.all([HZ.loadConfig(), HZ.loadWorkouts(), loadClients(), loadSettings()]);
+    A.error = null;
+  } catch(e){ console.error(e); A.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; A.checked = true; }
+  render();
+}
+async function loadClients(){
+  const [pr, lg] = await Promise.all([
+    HZ.sb.from("profiles").select("id,name,email,is_admin,created_at").order("name"),
+    HZ.sb.from("logs").select("user_id,date,fatigue,own")
+  ]);
+  if (pr.error) throw pr.error; if (lg.error) throw lg.error;
+  A.clients = pr.data.filter(p => !p.is_admin);
+  A.stats = {};
+  for (const l of lg.data){ const s = A.stats[l.user_id] || (A.stats[l.user_id] = { n:0, last:null, fsum:0, fn:0 });
+    s.n++; if (!s.last || l.date > s.last) s.last = l.date; if (l.fatigue != null){ s.fsum += l.fatigue; s.fn++; } }
+}
+async function loadSettings(){ const r = await HZ.sb.from("club_settings").select("join_code").eq("id", 1).maybeSingle(); A.joinCode = r.data ? r.data.join_code : null; }
+
+function view(){
+  if (!HZ.sb) return [header(), ...HZ.setupNeeded()];
+  if (A.authMode === "recovery") return [header(), el("div", { class:"auth" }, HZ.authView({ mode:"recovery", onMode: () => { A.authMode = "login"; A.checked = false; render(); if (A.session) loadAll(); } }))];
+  if (!A.session) return [header(), el("div", { class:"auth" }, HZ.authView({ mode:A.authMode, allowRegister:false, onMode: m => { A.authMode = m; render(); },
+    title: A.authMode === "login" ? "Panel trenera" : null, sub: A.authMode === "login" ? "Dostęp tylko dla kont z rolą trenera." : null }))];
+  if (!A.checked) return [header(), el("div", { class:"empty", text:"Sprawdzam uprawnienia…" })];
+  if (A.error) return [header(), el("div", { class:"empty" }, el("p", { text:A.error }), el("button", { onclick(){ A.checked = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
+  if (!A.profile || !A.profile.is_admin) return [header(), el("div", { class:"card auth" }, el("h2", { text:"Brak uprawnień trenera" }),
+    el("p", { class:"muted", text:`Konto ${A.session.user.email} nie ma roli trenera. Zaloguj się kontem trenera albo nadaj tę rolę w Supabase (instrukcja w README).` }),
+    el("div", { class:"row" }, el("button", { onclick(){ HZ.sb.auth.signOut(); }, text:"Wyloguj się" }), el("a", { href:"./", class:"small", text:"Przejdź do panelu klienta" })))];
+  return [header(), HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body()];
+}
+function header(){
+  return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
+    A.session && A.profile && A.profile.is_admin ? el("div", { class:"row" }, el("a", { href:"./", class:"small", text:"Widok klienta" }), el("button", { class:"ghost", onclick(){ HZ.sb.auth.signOut(); }, text:"Wyloguj" })) : null);
+}
+function body(){
+  if (!S.config.exercises.length && A.tab !== "settings") return [setupEmpty()];
+  if (A.tab === "settings") return settingsView();
+  if (A.tab === "results") return resultsView();
+  if (A.tab === "clients") return clientsView();
+  return workoutsView();
+}
+
+/* ---------- first run ---------- */
+function setupEmpty(){
+  return el("div", { class:"empty" }, el("h3", { text:"Zacznij od listy ćwiczeń i gum" }),
+    el("p", { class:"small", text:"Dodaj ćwiczenia ze stacji i kolory gum w kolejności od najmocniejszej. Możesz też wczytać przykładowy zestaw i go poprawić." }),
+    el("div", { class:"row", style:"justify-content:center" },
+      el("button", { class:"primary", onclick(){ A.tab = "settings"; render(); }, text:"Dodaj ćwiczenia" }),
+      el("button", { async onclick(ev){ ev.currentTarget.disabled = true;
+        const bands = [["Czarna","#222222"],["Fioletowa","#7048E8"],["Zielona","#2F9E44"],["Czerwona","#E03131"],["Żółta","#FAB005"]].map(([name,color],position) => ({ name, color, position }));
+        const exercises = [["Przysiad ze sztangą","kg",2.5],["Wyciskanie hantli","kg",1],["Martwy ciąg rumuński","kg",2.5],["Podciąganie","band",0],["Pompki","bw",0]].map(([name,type,inc],position) => ({ name, type, inc, position }));
+        const a = await HZ.sb.from("bands").insert(bands); const b = await HZ.sb.from("exercises").insert(exercises);
+        if (a.error || b.error){ toast(HZ.dbError(a.error || b.error)); render(); return; }
+        await HZ.loadConfig(); toast("Wczytano przykład. Popraw go w zakładce Ćwiczenia i ustawienia."); render(); }, text:"Wczytaj przykład" })));
+}
+
+/* ---------- settings: exercises, bands, join code ---------- */
+function settingsView(){
+  if (!A.editC) A.editC = HZ.clone(S.config);
+  const c = A.editC;
+  const exCard = el("div", { class:"card" }, el("h2", { text:"Ćwiczenia" }),
+    el("p", { class:"small muted", text:"Typ decyduje o podpowiedzi: ciężar dokłada kilogramy, guma zmienia ją na słabszą, masa ciała dokłada powtórzenia." }),
+    el("div", { class:"list" }, c.exercises.map((e, i) => el("div", { class:"stack" },
+      el("div", { class:"row", style:"flex-wrap:nowrap" },
+        el("input", { id:`ex-n-${e.id || i}`, maxlength:"80", value:e.name, "aria-label":"Nazwa ćwiczenia", placeholder:"Nazwa ćwiczenia", oninput(ev){ e.name = ev.target.value; } }),
+        el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.exercises[i-1], c.exercises[i]] = [c.exercises[i], c.exercises[i-1]]; render(); }, text:"↑" }),
+        el("button", { class:"ghost", "aria-label":"Usuń ćwiczenie", onclick(){ c.exercises.splice(i, 1); render(); }, text:"✕" })),
+      el("div", { class:"grid2" },
+        el("label", { class:"f" }, "Typ", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).map(([k,v]) => el("option", { value:k, text:v })))),
+        e.type === "kg" ? el("label", { class:"f" }, "Skok ciężaru", el("select", { id:`ex-i-${e.id || i}`, value:String(e.inc || 2.5), onchange(ev){ e.inc = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) + " kg" })))) : el("span"))))),
+    el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", inc:2.5 }); render(); }, text:"+ Dodaj ćwiczenie" }));
+  const bandCard = el("div", { class:"card" }, el("h2", { text:"Gumy" }),
+    el("p", { class:"small muted", text:"Ułóż od najmocniejszej (największa asysta) do najsłabszej. Podpowiedź przesuwa klienta w dół listy." }),
+    el("div", { class:"list" }, c.bands.map((b, i) => el("div", { class:"row", style:"flex-wrap:nowrap" },
+      el("input", { id:`b-c-${b.id || i}`, type:"color", value:b.color || "#888888", "aria-label":"Kolor gumy", style:"width:46px;padding:2px;flex:none", oninput(ev){ b.color = ev.target.value; } }),
+      el("input", { id:`b-n-${b.id || i}`, maxlength:"40", value:b.name, "aria-label":"Nazwa gumy", placeholder:"np. Zielona", oninput(ev){ b.name = ev.target.value; } }),
+      el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.bands[i-1], c.bands[i]] = [c.bands[i], c.bands[i-1]]; render(); }, text:"↑" }),
+      el("button", { class:"ghost", "aria-label":"W dół", disabled:i === c.bands.length - 1, onclick(){ [c.bands[i+1], c.bands[i]] = [c.bands[i], c.bands[i+1]]; render(); }, text:"↓" }),
+      el("button", { class:"ghost", "aria-label":"Usuń gumę", onclick(){ c.bands.splice(i, 1); render(); }, text:"✕" })))),
+    el("button", { onclick(){ c.bands.push({ id:HZ.uuid(), name:"", color:"#888888" }); render(); }, text:"+ Dodaj gumę" }));
+  const save = el("div", { class:"row" },
+    el("button", { class:"primary", async onclick(ev){ ev.currentTarget.disabled = true; const ok = await saveLibrary(c); if (ok){ A.editC = null; toast("Zapisano ćwiczenia i gumy"); } render(); }, text:"Zapisz ćwiczenia i gumy" }),
+    el("button", { onclick(){ A.editC = null; render(); }, text:"Cofnij zmiany" }));
+  const codeIn = el("input", { id:"join-code", maxlength:"40", value:A.joinCode || "", placeholder:"brak kodu", style:"text-transform:uppercase" });
+  const codeCard = el("div", { class:"card" }, el("h2", { text:"Kod klubu" }),
+    el("p", { class:"small muted", text:"Nowy klient wpisuje ten kod przy zakładaniu konta. Dzięki temu konta nie założy nikt spoza grupy. Zmień kod, jeśli wycieknie; istniejących kont to nie dotyczy." }),
+    el("label", { class:"f" }, "Aktualny kod", codeIn),
+    el("button", { async onclick(){ const v = codeIn.value.trim().toUpperCase();
+      if (v && v.length < 3){ toast("Kod musi mieć co najmniej 3 znaki."); return; }
+      const { error } = await HZ.sb.from("club_settings").upsert({ id:1, join_code: v || null });
+      if (error){ toast(HZ.dbError(error)); return; } A.joinCode = v || null; toast(v ? "Zapisano kod klubu" : "Kod wyłączony: każdy z linkiem może założyć konto"); render(); }, text:"Zapisz kod" }));
+  return [exCard, bandCard, save, codeCard];
+}
+async function saveLibrary(c){
+  const exs = c.exercises.filter(e => e.name.trim()).map((e, position) => ({ id:e.id || HZ.uuid(), name:e.name.trim(), type:e.type, inc:e.type === "kg" ? (e.inc || 2.5) : 0, position }));
+  const bds = c.bands.filter(b => b.name.trim()).map((b, position) => ({ id:b.id || HZ.uuid(), name:b.name.trim(), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", position }));
+  const none = "00000000-0000-0000-0000-000000000000";
+  const steps = [
+    exs.length ? HZ.sb.from("exercises").upsert(exs) : null,
+    bds.length ? HZ.sb.from("bands").upsert(bds) : null,
+    HZ.sb.from("exercises").delete().not("id", "in", `(${(exs.map(e => e.id).concat(none)).join(",")})`),
+    HZ.sb.from("bands").delete().not("id", "in", `(${(bds.map(b => b.id).concat(none)).join(",")})`)
+  ];
+  for (const p of steps){ if (!p) continue; const { error } = await p; if (error){ toast(HZ.dbError(error)); return false; } }
+  await HZ.loadConfig(); return true;
+}
+
+/* ---------- workouts ---------- */
+function workoutsView(){
+  if (A.editW) return [workoutEditor()];
+  const ws = HZ.sortedWorkouts().reverse();
+  const nextFri = (() => { const d = new Date(); d.setDate(d.getDate() + (5 - d.getDay() + 7) % 7); return d.toLocaleDateString("sv-SE"); })();
+  const out = [el("div", { class:"row between" }, el("h2", { text:"Treningi" }), el("button", { class:"primary", onclick(){
+    const last = HZ.sortedWorkouts().slice(-1)[0];
+    A.editW = { id:null, date:nextFri, title:"", note:"", stations: last ? HZ.clone(last.stations || []).map(s => ({ ...s, id:HZ.uuid() })) : [newStation()] };
+    render(); }, text:"+ Nowy trening" }))];
+  if (!ws.length) out.push(el("div", { class:"empty", text:"Brak treningów. Dodaj pierwszy piątek, a klienci zobaczą stacje u siebie." }));
+  ws.forEach(w => out.push(el("div", { class:"card" },
+    el("div", { class:"row between" },
+      el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date, true)}` }), el("h3", { text:w.title || "Trening stacyjny" })),
+      el("div", { class:"row" }, el("button", { onclick(){ A.editW = HZ.clone(w); render(); }, text:"Edytuj" }),
+        el("button", { onclick(){ A.tab = "results"; A.res = { wid:w.id, rows:null, loading:false }; HZ.LS.set("hz-admin-tab", "results"); render(); }, text:"Wyniki" }))),
+    el("div", { class:"chips" }, (w.stations || []).map((s, i) => { const ex = HZ.exById(s.exId); return el("span", { class:"chip", text:`${i+1}. ${ex ? ex.name : "?"} ${s.sets}×${s.reps}` }); })),
+    A.confirmDel === w.id
+      ? el("div", { class:"row" }, el("span", { class:"small", text:"Usunąć trening? Wpisy klientów zostaną w ich historii." }),
+          el("button", { class:"danger", async onclick(){ const { error } = await HZ.sb.from("workouts").delete().eq("id", w.id); if (error){ toast(HZ.dbError(error)); return; }
+            S.workouts = S.workouts.filter(x => x.id !== w.id); A.confirmDel = null; toast("Usunięto"); render(); }, text:"Usuń" }),
+          el("button", { onclick(){ A.confirmDel = null; render(); }, text:"Anuluj" }))
+      : el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ A.confirmDel = w.id; render(); }, text:"Usuń trening" }))));
+  return out;
+}
+const newStation = () => ({ id:HZ.uuid(), exId:(S.config.exercises[0] || {}).id, sets:3, reps:5, work:"", rest:"", note:"" });
+function workoutEditor(){
+  const w = A.editW;
+  return el("div", { class:"card" },
+    el("h2", { text: w.id ? "Edytuj trening" : "Nowy trening" }),
+    el("div", { class:"grid2" },
+      el("label", { class:"f" }, "Data", el("input", { id:"we-date", type:"date", value:w.date, onchange(e){ w.date = e.target.value; } })),
+      el("label", { class:"f" }, "Nazwa (opcjonalnie)", el("input", { id:"we-title", maxlength:"80", value:w.title || "", placeholder:"np. Siła – dół", oninput(e){ w.title = e.target.value; } }))),
+    el("label", { class:"f" }, "Wskazówki dla grupy", el("textarea", { id:"we-note", maxlength:"1000", value:w.note || "", placeholder:"np. Rotacja co 8 min, każdy zaczyna od innej stacji", oninput(e){ w.note = e.target.value; } })),
+    el("h3", { text:"Stacje" }),
+    el("div", { class:"list" }, w.stations.map((s, i) => el("div", { class:"stack" },
+      el("div", { class:"row", style:"flex-wrap:nowrap" }, el("span", { class:"num", style:"font-size:1.4rem;font-weight:700;width:1.6rem;flex:none", text:i+1 }),
+        el("select", { id:`st-ex-${s.id}`, "aria-label":"Ćwiczenie", value:s.exId || "", onchange(e){ s.exId = e.target.value; } }, S.config.exercises.map(e => el("option", { value:e.id, text:e.name }))),
+        el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [w.stations[i-1], w.stations[i]] = [w.stations[i], w.stations[i-1]]; render(); }, text:"↑" }),
+        el("button", { class:"ghost", "aria-label":"W dół", disabled:i === w.stations.length - 1, onclick(){ [w.stations[i+1], w.stations[i]] = [w.stations[i], w.stations[i+1]]; render(); }, text:"↓" }),
+        el("button", { class:"ghost", "aria-label":"Usuń stację", onclick(){ w.stations.splice(i, 1); render(); }, text:"✕" })),
+      el("div", { class:"grid4" },
+        el("label", { class:"f" }, "Serie", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
+        el("label", { class:"f" }, "Powtórzenia", el("input", { id:`st-r-${s.id}`, inputmode:"numeric", value:String(s.reps || ""), oninput(e){ s.reps = Math.round(HZ.parseNum(e.target.value) || 0); } })),
+        el("label", { class:"f" }, "Czas na stacji", el("input", { id:`st-w-${s.id}`, maxlength:"30", value:s.work || "", placeholder:"np. 8 min", oninput(e){ s.work = e.target.value; } })),
+        el("label", { class:"f" }, "Przerwa", el("input", { id:`st-p-${s.id}`, maxlength:"30", value:s.rest || "", placeholder:"np. 90 s", oninput(e){ s.rest = e.target.value; } }))),
+      el("input", { id:`st-n-${s.id}`, maxlength:"200", value:s.note || "", placeholder:"Uwaga techniczna (opcjonalnie)", "aria-label":"Uwaga do stacji", oninput(e){ s.note = e.target.value; } })))),
+    el("button", { onclick(){ w.stations.push(newStation()); render(); }, text:"+ Dodaj stację" }),
+    el("div", { class:"row" },
+      el("button", { class:"primary", async onclick(ev){
+        if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jedną stację."); return; }
+        const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(),
+          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, exId:s.exId, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
+        ev.currentTarget.disabled = true;
+        const { data, error } = await HZ.sb.from("workouts").upsert(row).select().single();
+        if (error){ toast(HZ.dbError(error)); render(); return; }
+        S.workouts = S.workouts.filter(x => x.id !== data.id).concat(data); A.editW = null; toast("Zapisano trening. Klienci już go widzą."); render(); }, text:"Zapisz trening" }),
+      el("button", { onclick(){ A.editW = null; render(); }, text:"Anuluj" })));
+}
+
+/* ---------- results ---------- */
+async function loadResults(wid){
+  A.res = { wid, rows:null, loading:true }; render();
+  const { data, error } = await HZ.sb.from("logs").select("*").eq("workout_id", wid);
+  if (error){ toast(HZ.dbError(error)); A.res = { wid, rows:[], loading:false }; render(); return; }
+  const byUser = new Map(data.map(l => [l.user_id, l]));
+  const rows = A.clients.map(c => ({ client:c, log:byUser.get(c.id) || null }));
+  for (const l of data) if (!A.clients.some(c => c.id === l.user_id)) rows.push({ client:{ id:l.user_id, name:"(trener)" }, log:l });
+  rows.sort((a,b) => (b.log ? 1 : 0) - (a.log ? 1 : 0) || (a.client.name || "").localeCompare(b.client.name || "", "pl"));
+  A.res = { wid, rows, loading:false }; render();
+}
+function resultsView(){
+  const ws = HZ.sortedWorkouts(); if (!ws.length) return [el("div", { class:"empty", text:"Wyniki pojawią się, gdy dodasz trening i klienci zapiszą serie." })];
+  const wid = A.res.wid && ws.some(w => w.id === A.res.wid) ? A.res.wid : HZ.defaultWorkoutId();
+  if (!A.res.loading && (A.res.wid !== wid || !A.res.rows)) setTimeout(() => loadResults(wid), 0);
+  const pick = el("select", { id:"res-w", "aria-label":"Trening", onchange(e){ loadResults(e.target.value); } },
+    [...ws].reverse().map(w => el("option", { value:w.id, text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date)}${w.title ? " · " + w.title : ""}` })));
+  pick.value = wid;
+  const rows = A.res.wid === wid ? A.res.rows : null; const done = rows ? rows.filter(r => r.log) : [];
+  const avg = (() => { const f = done.map(r => r.log.fatigue).filter(v => v != null); return f.length ? (f.reduce((a,b) => a+b, 0) / f.length).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–"; })();
+  const out = [el("div", { class:"card" },
+    el("div", { class:"row between" }, el("h2", { text:"Wyniki grupy" }), el("div", { style:"flex:1 1 200px;max-width:280px" }, pick)),
+    rows ? el("div", { class:"grid3" },
+      el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Wpisało się" }), el("span", { class:"v", text:`${done.length}/${A.clients.length}` })),
+      el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Śr. zmęczenie" }), el("span", { class:"v", text:avg })),
+      el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Stacje" }), el("span", { class:"v", text:((ws.find(w => w.id === wid) || {}).stations || []).length })))
+      : el("p", { class:"muted", text:"Wczytuję wpisy…" }),
+    el("div", { class:"row" }, el("button", { onclick(){ loadResults(wid); }, text:"Odśwież" }), done.length ? el("button", { onclick(){ exportCsv(wid, done); }, text:"Pobierz CSV" }) : null))];
+  if (rows && !A.clients.length) out.push(el("div", { class:"empty", text:"Nikt jeszcze nie założył konta. Wyślij klientom link do strony głównej i kod klubu." }));
+  if (rows) rows.forEach(({ client, log }) => out.push(el("div", { class:"card" },
+    el("div", { class:"row between" }, el("h3", { text:client.name || client.email || "Klient" }),
+      el("div", { class:"row" }, log && log.fatigue != null ? el("span", { class:"chip", text:`Zmęczenie ${log.fatigue}/10` }) : null,
+        el("button", { class:"ghost", onclick(){ openClient(client.id); }, text:"Historia →" }))),
+    log ? el("div", { class:"list" }, (log.entries || []).map(e => el("div", { class:"stack", style:"gap:2px" },
+        el("span", { style:"font-weight:600", text:`${e.exName} · cel ${e.targetSets}×${e.targetReps}` }),
+        el("span", { class:"num", style:"font-size:1.05rem", text:HZ.setsText(e) }))))
+      : el("span", { class:"muted small", text:"Brak wpisu z tego treningu." }),
+    log && log.note ? el("p", { class:"small", text:"Notatka: " + log.note }) : null)));
+  return out;
+}
+function exportCsv(wid, rows){
+  const w = S.workouts.find(x => x.id === wid);
+  const lines = [["data","trening","klient","cwiczenie","cel","seria","obciazenie","powtorzenia","RIR","zmeczenie"].join(";")];
+  for (const { client, log } of rows) for (const e of (log.entries || [])) e.sets.forEach((s, i) => lines.push([log.date, "#" + HZ.workoutNo(wid), client.name, e.exName, `${e.targetSets}x${e.targetReps}`, i+1,
+    e.type === "band" ? HZ.bandName(s.load) : (s.load == null ? "" : String(s.load).replace(".", ",")), s.reps, s.rir ?? "", log.fatigue ?? ""]
+    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(";")));
+  const blob = new Blob(["﻿" + lines.join("\n")], { type:"text/csv;charset=utf-8" });
+  const a = el("a", { href:URL.createObjectURL(blob), download:`hubzone-wyniki-${w ? w.date : "trening"}.csv` });
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+/* ---------- clients ---------- */
+async function openClient(id){
+  A.tab = "clients"; HZ.LS.set("hz-admin-tab", "clients"); A.clientId = id; A.clientLogs = null; render();
+  const { data, error } = await HZ.sb.from("logs").select("*").eq("user_id", id).order("date");
+  if (error){ toast(HZ.dbError(error)); A.clientLogs = []; } else A.clientLogs = data;
+  render(); window.scrollTo(0, 0);
+}
+function clientsView(){
+  if (A.clientId){
+    const c = A.clients.find(x => x.id === A.clientId) || { name:"Klient" };
+    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })),
+      ...(A.clientLogs ? HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render) : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
+  }
+  if (!A.clients.length) return [el("div", { class:"empty" }, el("h3", { text:"Brak klientów" }), el("p", { class:"small", text:"Klienci pojawią się tu po założeniu konta na stronie głównej z kodem klubu." }))];
+  return [el("div", { class:"card" },
+    el("div", { class:"row between" }, el("h2", { text:`Klienci (${A.clients.length})` }), el("button", { async onclick(){ await loadClients(); render(); toast("Odświeżono"); }, text:"Odśwież" })),
+    el("div", { class:"tablewrap" }, el("table", {},
+      el("thead", {}, el("tr", {}, el("th", { text:"Imię" }), el("th", { text:"Treningi" }), el("th", { text:"Ostatni" }), el("th", { text:"Śr. zmęcz." }))),
+      el("tbody", {}, A.clients.map(c => { const s = A.stats[c.id] || { n:0 };
+        return el("tr", {},
+          el("td", {}, el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email })),
+          el("td", { text:s.n }), el("td", { text: s.last ? HZ.fmtDate(s.last) : "–" }),
+          el("td", { text: s.fn ? (s.fsum / s.fn).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–" })); })))))];
+}
+
+/* ---------- boot ---------- */
+if (!HZ.sb){ render(); return; }
+render();
+HZ.sb.auth.onAuthStateChange((event, session) => {
+  const was = A.session && A.session.user.id;
+  A.session = session;
+  if (event === "PASSWORD_RECOVERY"){ A.authMode = "recovery"; render(); return; }
+  if (A.authMode === "recovery" && session){ render(); return; }
+  if (!session){ A.checked = false; A.profile = null; render(); return; }
+  if (was !== session.user.id){ A.checked = false; render(); setTimeout(loadAll, 0); }
+});
+})();
