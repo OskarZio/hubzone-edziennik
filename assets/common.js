@@ -398,12 +398,27 @@ HZ.progressView = (logs, title, key, rerender) => {
   out.push(el("div", { class:"card" },
     el("div", { class:"row between" }, el("h3", { text:"Wykres postępu" }), el("div", { style:"flex:1 1 180px;max-width:260px" }, sel)),
     el("span", { class:"small muted", text:yLabel }),
+    compareRow(pts, ex),
     pts.length ? HZ.lineChart(pts, { ticks, fmt: ex.type === "kg" ? v => fmtKg(v) : v => String(Math.round(v)) }) : el("p", { class:"muted", text:"Brak danych." }),
     el("div", { class:"tablewrap" }, el("table", {},
       el("thead", {}, el("tr", {}, el("th", { text:"Data" }), el("th", { text:"Serie" }), el("th", { text:"RIR" }), el("th", { text:"Zmęcz." }))),
       el("tbody", {}, rows)))));
   return out;
 };
+/* last vs previous vs first workout, for the selected exercise */
+function compareRow(pts, ex){
+  if (pts.length < 2) return pts.length ? el("p", { class:"small muted", text:"Po kolejnym treningu zobaczysz tu porównanie z poprzednim." }) : null;
+  const last = pts[pts.length - 1], prev = pts[pts.length - 2], first = pts[0];
+  const sign = v => (v > 0 ? "+" : v < 0 ? "−" : "±") ;
+  const fmt = (a, b) => {
+    const d = a.y - b.y;
+    if (ex.type === "kg") return `${sign(d)}${HZ.fmtKg(Math.abs(d))} kg` + (b.y > 0 && d ? ` (${sign(d)}${Math.round(Math.abs(d) / b.y * 100)}%)` : "");
+    return d === 0 ? "ta sama guma" : `${Math.abs(d)} ${d > 0 ? "słabsz" : "mocniejsz"}${Math.abs(d) === 1 ? "a guma" : "e gumy"}`;
+  };
+  const cls = d => d > 0 ? "up" : d < 0 ? "down" : "";
+  const tile = (label, a, b) => el("div", { class:"stat cmp " + cls(a.y - b.y) }, el("span", { class:"eyebrow", text:label }), el("span", { class:"v", style:"font-size:1.3rem", text:fmt(a, b) }), el("span", { class:"small muted", text:`${HZ.fmtDate(b.x)} → ${HZ.fmtDate(a.x)}` }));
+  return el("div", { class:"grid2" }, tile("Vs poprzedni trening", last, prev), tile("Od pierwszego treningu", last, first));
+}
 function niceStep(raw){ const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; }
 HZ.lineChart = (pts, { ticks, fmt }) => {
   const W = 360, H = 190, L = ticks ? 74 : 40, R = 14, T = 14, B = 26;
@@ -418,6 +433,7 @@ HZ.lineChart = (pts, { ticks, fmt }) => {
     tickVals.map(t => sv("g", {}, sv("line", { x1:L, x2:W-R, y1:y(t.v), y2:y(t.v), stroke:"var(--line)", "stroke-width":1 }), sv("text", { x:L-6, y:y(t.v)+4, "text-anchor":"end", ...font }, t.t))),
     pts.length > 1 ? sv("path", { d:`M${x(0)},${H-B} ` + pts.map((p,i) => `L${x(i)},${y(p.y)}`).join(" ") + ` L${x(pts.length-1)},${H-B} Z`, fill:"var(--accent)", "fill-opacity":0.1, stroke:"none" }) : null,
     pts.length > 1 ? sv("path", { d:pts.map((p,i) => `${i ? "L" : "M"}${x(i)},${y(p.y)}`).join(" "), fill:"none", stroke:"var(--accent)", "stroke-width":2, "stroke-linejoin":"round" }) : null,
+    !ticks && pts.length <= 10 ? pts.map((p,i) => sv("text", { x:x(i), y:y(p.y) - 9, "text-anchor": i === 0 && pts.length > 1 ? "start" : i === pts.length - 1 && pts.length > 1 ? "end" : "middle", "font-size":11, "font-weight":600, fill:"var(--ink)", "font-family":"IBM Plex Sans, system-ui, sans-serif" }, fmt(p.y))) : null,
     pts.map((p,i) => sv("circle", { cx:x(i), cy:y(p.y), r: i === pts.length-1 ? 5 : 3.5, fill: i === pts.length-1 ? "var(--accent)" : "var(--surface)", stroke:"var(--accent)", "stroke-width":2 })),
     sv("text", { x:L, y:H-6, ...font }, HZ.fmtDate(pts[0].x)),
     pts.length > 1 ? sv("text", { x:W-R, y:H-6, "text-anchor":"end", ...font }, HZ.fmtDate(pts[pts.length-1].x)) : null);
