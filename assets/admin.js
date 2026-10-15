@@ -15,6 +15,7 @@ async function loadAll(){
     A.profile = pr.data; A.checked = true;
     if (!A.profile || !A.profile.is_admin){ render(); return; }
     await Promise.all([HZ.loadConfig(), HZ.loadWorkouts(), loadClients(), loadSettings()]);
+    Promise.all((A.admins || []).map(x => HZ.api.deleteRanking(x.id))).catch(() => {});   // trainers never appear in the ranking
     A.error = null;
   } catch(e){ console.error(e); A.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; A.checked = true; }
   render();
@@ -22,6 +23,7 @@ async function loadAll(){
 async function loadClients(){
   const [pr, lg] = await Promise.all([HZ.api.users(), HZ.api.allLogs()]);
   if (pr.error) throw pr.error; if (lg.error) throw lg.error;
+  A.admins = pr.data.filter(p => p.is_admin);
   A.clients = pr.data.filter(p => !p.is_admin).sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl"));
   A.stats = {};
   for (const l of lg.data){ const s = A.stats[l.user_id] || (A.stats[l.user_id] = { n:0, last:null, fsum:0, fn:0 });
@@ -53,7 +55,11 @@ function body(){
   if (A.tab === "results") return resultsView();
   if (A.tab === "clients") return clientsView();
   if (A.tab === "ranking"){
-    if (!A.rankRows){ HZ.api.ranking().then(r => { A.rankRows = r.data || []; if (r.error) toast(HZ.dbError(r.error)); render(); }); return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
+    if (!A.rankRows){ HZ.api.ranking().then(async r => {
+        const rows = r.data || []; const admins = new Set((A.admins || []).map(x => x.id));
+        for (const x of rows.filter(x => admins.has(x.id))) await HZ.api.deleteRanking(x.id);   // trainers are not ranked
+        A.rankRows = rows.filter(x => !admins.has(x.id)); if (r.error) toast(HZ.dbError(r.error)); render(); });
+      return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
     return [...HZ.rankingView(A.rankRows, null, render, { showHidden:true }),
       el("div", { class:"row" }, el("button", { onclick(){ A.rankRows = null; render(); }, text:"Odśwież" }),
         el("span", { class:"small muted", text: S.config.rankingEnabled ? "Klienci widzą ranking. Osoby ukryte widzisz tylko Ty." : "Ranking jest wyłączony dla klientów (Ćwiczenia i ustawienia)." }))];
@@ -89,12 +95,15 @@ function settingsView(){
       el("div", { class:"grid2" },
         el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).filter(([k]) => k !== "bw").map(([k,v]) => el("option", { value:k, text:v })))),
         el("details", { class:"w1", style:"grid-column:1/-1", open: (e.warmStart || (e.warmBand && e.warmBand !== HZ.SCAP) || e.warmLabel || e.warmReps || e.warmKgScap) ? true : null },
-          el("summary", { text:"Seria wstępna W1 (ustalasz sam)" }),
+          el("summary", { text:"Seria wstępna W1 i ranking (ustalasz sam)" }),
           el("div", { class:"grid2", style:"margin-top:8px" },
             el("label", { class:"f" }, "Ciężar W1 (kg)", el("input", { id:`ex-ws-${e.id || i}`, inputmode:"decimal", value: e.warmStart ? HZ.fmtKg(e.warmStart) : "", placeholder:"np. 20 (gryf)", oninput(ev){ e.warmStart = HZ.parseNum(ev.target.value); } })),
             el("label", { class:"f" }, "Guma W1", el("select", { id:`ex-wb-${e.id || i}`, value: e.warmBand || HZ.SCAP, onchange(ev){ e.warmBand = ev.target.value; } },
               el("option", { value:HZ.SCAP, text:"bez gumy (np. aktywacja)" }), el("option", { value:"auto", text:"najmocniejsza guma" }),
               c.bands.filter(b => b.name.trim()).map(b => el("option", { value:b.id, text:b.name })))),
+            el("label", { class:"row small", style:"grid-column:1/-1;flex-wrap:nowrap;cursor:pointer;gap:6px" },
+              el("input", { id:`ex-bw-${e.id || i}`, type:"checkbox", style:"width:auto", checked: (e.bwBased ?? e.type === "band") || null, onchange(ev){ e.bwBased = ev.target.checked; } }),
+              el("span", { text:"Ćwiczenie z masą ciała (podciąganie, dipy): % masy ciała = masa ciała + dociążenie" })),
             el("label", { class:"row small", style:"grid-column:1/-1;flex-wrap:nowrap;cursor:pointer;gap:6px" },
               el("input", { id:`ex-wk-${e.id || i}`, type:"checkbox", style:"width:auto", checked: e.warmKgScap || null, onchange(ev){ e.warmKgScap = ev.target.checked; } }),
               el("span", { text:"Przy ciężarze W1 też bez obciążenia (np. dipy: aktywacja łopatek)" })),
@@ -151,7 +160,7 @@ function settingsView(){
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
-    warmBand: e.warmBand || HZ.SCAP, warmKgScap: !!e.warmKgScap, warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
+    warmBand: e.warmBand || HZ.SCAP, warmKgScap: !!e.warmKgScap, bwBased: e.bwBased ?? e.type === "band", warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
   const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null, kgMax: Number(b.kgMax) > Number(b.kg) ? Math.round(Number(b.kgMax) * 10) / 10 : null }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
   if (error){ toast(HZ.dbError(error)); return false; }
@@ -351,7 +360,7 @@ async function saveEntry(btn){
   if (error){ toast(HZ.dbError(error)); btn.disabled = false; return; }
   const all = logs.filter(l => l.id !== data.id).concat(data);
   if (S.config.rankingEnabled !== false){
-    const rk = await HZ.api.saveRanking(client.id, { name:client.name, ...HZ.rankRow(HZ.computeStats(all)), hidden:false, updatedAt:new Date().toISOString() });
+    const rk = await HZ.api.saveRanking(client.id, { name:client.name, ...HZ.rankRow(HZ.computeStats(all), client.bodyweight), hidden:false, updatedAt:new Date().toISOString() });
     if (rk.error) toast("Wyniki zapisane, ale ranking się nie zaktualizował: opublikuj nowe reguły w Firebase.");
   }
   A.entry = null; A.rankRows = null; toast(`Zapisano wyniki: ${client.name}`);
@@ -376,7 +385,16 @@ function clientsView(){
               A.clients = A.clients.filter(x => x.id !== c.id); A.clientId = null; A.confirmDelClient = null; A.rankRows = null; toast("Usunięto"); render(); }, text:"Usuń" }),
             el("button", { onclick(){ A.confirmDelClient = null; render(); }, text:"Anuluj" }))
         : el("button", { class:"ghost", onclick(){ A.confirmDelClient = c.id; render(); }, text:"Usuń klienta" })) : null;
-    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), manualBar,
+    const bwIn = el("input", { id:"cl-bw", inputmode:"decimal", placeholder:"kg", value: c.bodyweight ? HZ.fmtKg(c.bodyweight) : "", style:"max-width:6rem;text-align:center" });
+    const bwBar = c.manual ? el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn,
+        el("button", { async onclick(){ const v = HZ.parseNum(bwIn.value); if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg."); return; }
+          const bw = v == null ? null : Math.round(v * 10) / 10; const { error } = await HZ.api.updateProfile(c.id, { bodyweight:bw });
+          if (error){ toast(error.code === "permission-denied" ? "Opublikuj nowe reguły w Firebase (Firestore → Rules)." : HZ.dbError(error)); return; }
+          c.bodyweight = bw;
+          if (A.clientLogs && A.clientLogs.length) await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankRow(HZ.computeStats(A.clientLogs), bw), hidden:false, updatedAt:new Date().toISOString() });
+          A.rankRows = null; toast("Zapisano masę ciała"); render(); }, text:"Zapisz" }))
+      : el("p", { class:"small muted", text: c.bodyweight ? `Masa ciała: ${HZ.fmtKg(c.bodyweight)} kg` : "Masa ciała: nie wpisana (klient wpisuje ją w Konto)" });
+    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), manualBar, bwBar,
       ...(A.clientLogs ? [A.clientLogs.length ? HZ.personalStats(A.clientLogs, `Statystyki: ${c.name || "klient"}`) : null, ...HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render)] : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
   }
   const nameIn = el("input", { id:"manual-name", maxlength:"60", placeholder:"Imię (i nazwisko)" });

@@ -64,7 +64,8 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 /* ---------- ranking ---------- */
 async function syncRanking(){
   if (!S.config.rankingEnabled || !C.profile || !C.session) return;
-  const row = { name:C.profile.name || "", ...HZ.rankRow(HZ.computeStats(C.logs)), hidden: !!C.rankHidden };
+  if (C.profile.is_admin){ if (C.rankKey !== "admin"){ C.rankKey = "admin"; await HZ.api.deleteRanking(C.session.user.id); } return; }   // trainers are not ranked
+  const row = { name:C.profile.name || "", ...HZ.rankRow(HZ.computeStats(C.logs), C.profile.bodyweight), hidden: !!C.rankHidden };
   const key = JSON.stringify(row); if (key === C.rankKey) return;
   const { error } = await HZ.api.saveRanking(C.session.user.id, { ...row, updatedAt:new Date().toISOString() });
   if (!error){ C.rankKey = key; if (C.rankRows) loadRanking(); }
@@ -75,7 +76,8 @@ async function loadRanking(){
 }
 function rankingTab(){
   if (!C.rankRows){ loadRanking(); return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
-  return HZ.rankingView(C.rankRows, C.session.user.id, render);
+  const prompt = C.profile && C.profile.bodyweight ? null : bwForm("Wpisz swoją masę ciała, żeby pojawić się w rankingu siły względnej. Inni zobaczą tylko procenty.");
+  return HZ.rankingView(C.rankRows, C.session.user.id, render, { relPrompt:prompt });
 }
 function body(){
   if (C.tab === "ranking" && S.config.rankingEnabled) return rankingTab();
@@ -253,10 +255,22 @@ function ownView(){
 }
 
 /* ---------- account ---------- */
+function bwForm(hint){
+  const inp = el("input", { id:"acc-bw", inputmode:"decimal", placeholder:"np. 78,5", value: C.profile && C.profile.bodyweight ? HZ.fmtKg(C.profile.bodyweight) : "", style:"max-width:7rem;text-align:center" });
+  return el("div", { class:"stack", style:"gap:6px" }, hint ? el("p", { class:"small", text:hint }) : null,
+    el("div", { class:"row", style:"flex-wrap:nowrap" }, el("label", { class:"f", style:"flex:1" }, "Masa ciała (kg)", inp),
+      el("button", { style:"align-self:flex-end", async onclick(ev){ const v = HZ.parseNum(inp.value);
+        if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg, np. 78,5."); return; }
+        ev.currentTarget.disabled = true; const { error } = await HZ.api.updateProfile(C.session.user.id, { bodyweight: v == null ? null : Math.round(v * 10) / 10 });
+        ev.currentTarget.disabled = false;
+        if (error){ toast(error.code === "permission-denied" ? "Nie udało się zapisać: trener musi zaktualizować reguły bazy." : HZ.dbError(error)); return; }
+        C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
+}
 function accountView(){
   const nameIn = el("input", { id:"acc-name", maxlength:"60", value:(C.profile && C.profile.name) || "" });
   return [el("div", { class:"card" }, el("h2", { text:"Twoje konto" }),
       el("p", { class:"small muted", text:C.session.user.email }),
+      bwForm("Masa ciała służy tylko do rankingu siły względnej (% masy ciała). Widzisz ją Ty i trener, inni tylko procenty."),
       S.config.rankingEnabled ? el("label", { class:"row", style:"flex-wrap:nowrap;cursor:pointer" },
         el("input", { id:"rank-show", type:"checkbox", style:"width:auto", checked: !C.rankHidden || null, onchange(ev){ C.rankHidden = !ev.target.checked; syncRanking(); toast(C.rankHidden ? "Nie pokazujesz się w rankingu" : "Pokazujesz się w rankingu"); } }),
         el("span", { text:"Pokazuj mnie w rankingu grupy" })) : null,
