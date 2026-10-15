@@ -93,19 +93,18 @@ function settingsView(){
           el("select", { id:`ex-hi-${e.id || i}`, "aria-label":"Skok do", value:String(HZ.incRange(e)[1]), onchange(ev){ e.incMax = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))))))))),
     el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", incMin:1.25, incMax:2.5 }); render(); }, text:"+ Dodaj ćwiczenie" }));
   const bandCard = el("div", { class:"card" }, el("h2", { text:"Gumy" }),
-    el("p", { class:"small muted", text:"Ułóż od najmocniejszej (największa pomoc) do najsłabszej. W polu ~kg wybierz (1–5 kg), ile mniej więcej odciąża guma. Klient zobaczy to przy wyborze gumy, a podpowiedź przesuwa go w dół listy." }),
+    el("p", { class:"small muted", text:"Ułóż od najmocniejszej (największa pomoc) do najsłabszej. W polu kg wpisz, ile mniej więcej odciąża guma: jedną liczbę (15) albo zakres (3-5). Klient zobaczy to przy wyborze gumy, a podpowiedź przesuwa go w dół listy." }),
     el("div", { class:"list" }, c.bands.map((b, i) => el("div", { class:"row", style:"flex-wrap:nowrap" },
       el("input", { id:`b-c-${b.id || i}`, type:"color", value:b.color || "#888888", "aria-label":"Kolor gumy", style:"width:46px;padding:2px;flex:none", oninput(ev){ b.color = ev.target.value; } }),
       el("input", { id:`b-n-${b.id || i}`, maxlength:"40", value:b.name, "aria-label":"Nazwa gumy", placeholder:"np. Zielona", oninput(ev){ b.name = ev.target.value; } }),
-      el("select", { id:`b-kg-${b.id || i}`, "aria-label":"Pomoc gumy w kg (około)", value: b.kg ? String(b.kg) : "", style:"width:5.5rem;flex:none", onchange(ev){ b.kg = ev.target.value ? Number(ev.target.value) : null; render(); } },
-        el("option", { value:"", text:"~kg" }),
-        [...new Set([1,2,3,4,5].concat(b.kg ? [Number(b.kg)] : []))].sort((x,y) => x - y).map(v => el("option", { value:String(v), text:`${HZ.fmtKg(v)} kg` }))),
+      el("input", { id:`b-kg-${b.id || i}`, inputmode:"text", value: HZ.bandKgText(b), "aria-label":"Pomoc gumy w kg, np. 15 albo 3-5", placeholder:"kg", style:"width:5.5rem;flex:none;text-align:center",
+        oninput(ev){ const r = HZ.parseKgRange(ev.target.value); b.kg = r ? r[0] : null; b.kgMax = r && r[1] !== r[0] ? r[1] : null; } }),
       el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.bands[i-1], c.bands[i]] = [c.bands[i], c.bands[i-1]]; render(); }, text:"↑" }),
       el("button", { class:"ghost", "aria-label":"W dół", disabled:i === c.bands.length - 1, onclick(){ [c.bands[i+1], c.bands[i]] = [c.bands[i], c.bands[i+1]]; render(); }, text:"↓" }),
       el("button", { class:"ghost", "aria-label":"Usuń gumę", onclick(){ c.bands.splice(i, 1); render(); }, text:"✕" })))),
     el("div", { class:"row" },
       el("button", { onclick(){ c.bands.push({ id:HZ.uuid(), name:"", color:"#888888", kg:null }); render(); }, text:"+ Dodaj gumę" }),
-      c.bands.some(b => b.kg) ? el("button", { class:"ghost", onclick(){ c.bands.sort((a,b) => (Number(b.kg) || 0) - (Number(a.kg) || 0)); render(); }, text:"Ułóż według kg pomocy" }) : null));
+      c.bands.some(b => b.kg) ? el("button", { class:"ghost", onclick(){ c.bands.sort((a,b) => HZ.bandKgMid(b) - HZ.bandKgMid(a)); render(); }, text:"Ułóż według kg pomocy" }) : null));
   const save = el("div", { class:"row" },
     el("button", { class:"primary", async onclick(ev){ ev.currentTarget.disabled = true; const ok = await saveLibrary(c); if (ok){ A.editC = null; toast("Zapisano ćwiczenia i gumy"); } render(); }, text:"Zapisz ćwiczenia i gumy" }),
     el("button", { onclick(){ A.editC = null; render(); }, text:"Cofnij zmiany" }));
@@ -139,7 +138,7 @@ function settingsView(){
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1] }));
-  const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null }));
+  const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null, kgMax: Number(b.kgMax) > Number(b.kg) ? Math.round(Number(b.kgMax) * 10) / 10 : null }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
   if (error){ toast(HZ.dbError(error)); return false; }
   await HZ.loadConfig(); return true;

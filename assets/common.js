@@ -94,7 +94,12 @@ HZ.brand = (sub) => el("div", { class:"brand" }, el("span", { class:"mark", "ari
 const S = HZ.S = { config:{ exercises:[], bands:[] }, workouts:[] };
 HZ.exById = id => S.config.exercises.find(e => e.id === id);
 HZ.bandIdx = id => S.config.bands.findIndex(b => b.id === id);
-HZ.bandFull = id => { const b = S.config.bands.find(b => b.id === id); return b ? b.name + (b.kg ? ` (~${HZ.fmtKg(b.kg)} kg)` : "") : HZ.bandName(id); };
+/* band assistance: a single value (15) or a range (3–5 kg) */
+HZ.parseKgRange = t => { const m = String(t || "").replace(/,/g, ".").match(/^\s*(\d+(?:\.\d+)?)\s*(?:[-–—]\s*(\d+(?:\.\d+)?))?\s*(?:kg)?\s*$/i);
+  if (!m) return null; const a = Number(m[1]), b = m[2] != null ? Number(m[2]) : a; return a > 0 ? [Math.min(a, b), Math.max(a, b)] : null; };
+HZ.bandKgText = b => !b || !b.kg ? "" : b.kgMax ? `${HZ.fmtKg(b.kg)}–${HZ.fmtKg(b.kgMax)}` : HZ.fmtKg(b.kg);
+HZ.bandKgMid = b => !b || !b.kg ? 0 : b.kgMax ? (Number(b.kg) + Number(b.kgMax)) / 2 : Number(b.kg);
+HZ.bandFull = id => { const b = S.config.bands.find(b => b.id === id); return b ? b.name + (b.kg ? ` (~${HZ.bandKgText(b)} kg)` : "") : HZ.bandName(id); };
 HZ.bandName = id => { if (id === "none") return "bez gumy"; const b = S.config.bands.find(b => b.id === id); return b ? b.name : "?"; };
 HZ.sortedWorkouts = () => [...S.workouts].sort((a,b) => (a.date||"").localeCompare(b.date||""));
 HZ.workoutNo = id => HZ.sortedWorkouts().findIndex(w => w.id === id) + 1;
@@ -205,7 +210,7 @@ HZ.fatiguePicker = (cur, onPick) => el("div", { class:"fatigue", role:"group", "
   Array.from({ length:10 }, (_,i) => i+1).map(n => el("button", { type:"button", "aria-pressed":String(cur === n), onclick(){ onPick(cur === n ? null : n); }, text:n })));
 HZ.loadInput = (ex, val, onVal, id) => {
   if (ex.type === "band") return el("select", { id, "aria-label":"Guma", value: val || "", onchange(e){ onVal(e.target.value || null); } },
-    el("option", { value:"", text:"–" }), S.config.bands.map(b => el("option", { value:b.id, text: b.name + (b.kg ? ` ~${HZ.fmtKg(b.kg)} kg` : "") })), el("option", { value:"none", text:"bez gumy" }));
+    el("option", { value:"", text:"–" }), S.config.bands.map(b => el("option", { value:b.id, text: b.name + (b.kg ? ` ~${HZ.bandKgText(b)} kg` : "") })), el("option", { value:"none", text:"bez gumy" }));
   return el("input", { id, inputmode:"decimal", placeholder: ex.type === "bw" ? "+kg" : "kg", "aria-label": ex.type === "bw" ? "Dodatkowe obciążenie" : "Ciężar w kg",
     value: val == null ? "" : HZ.fmtKg(val), onchange(e){ onVal(HZ.parseNum(e.target.value)); } });
 };
