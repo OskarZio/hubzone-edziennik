@@ -170,6 +170,7 @@ HZ.warmupLoads = (ex, n, next) => {
     const k = HZ.bandIdx(w1); return [w1, ...ramp(n - 1, Math.min(k + 1, Math.max(k, top)))];
   }
   if (ex.type !== "kg") return Array(n).fill(null);
+  if (ex.warmKgScap){ const rest = HZ.warmupLoads({ ...ex, warmKgScap:false, warmStart:null }, n, next); rest[0] = HZ.SCAP; return rest; }
   const step = HZ.incRange(ex)[0], start = Number(ex.warmStart) > 0 ? Number(ex.warmStart) : null;
   const r = v => Math.max(0, Math.round(v / step) * step);
   if (next == null) return Array.from({ length:n }, (_, i) => i === 0 && start ? start : null);
@@ -278,7 +279,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     return el("div", { class:"set" + (s.warmup ? " warm" : "") },
       el("span", { class:"n", title: s.warmup ? "Seria wstępna" : null, text:label }),
       el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" }, sw ? el("span", { class:"swatch", style:`background:${sw}` }) : null,
-        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text: ex.warmLabel || "Aktywacja łopatek" }) : HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v;
+        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text: ex.warmLabel || "Aktywacja łopatek" }) : HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v; if (s.warmup) s.manual = true;
           for (let j = i+1; j < sets.length; j++) if (!!sets[j].warmup === !!s.warmup && (JSON.stringify(sets[j].load) === JSON.stringify(old) || sets[j].load == null || sets[j].load === "")) sets[j].load = v;
           onChange(true); }, `${keyPrefix}-l${i}`)),
       el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type, ex) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
@@ -323,10 +324,17 @@ HZ.applyLoad = (ex, sets, load) => {
   const warm = sets.filter(s => s.warmup);
   if ((ex.type === "kg" || ex.type === "band") && warm.every(s => s.reps == null)) HZ.warmupLoads(ex, warm.length, load).forEach((l, k) => { warm[k].load = l; });
 };
+/* untouched warm-ups (no manual load change, no reps yet) always follow the current settings */
+HZ.refreshWarmups = (ex, sets) => {
+  const warm = sets.filter(x => x.warmup); if (!warm.length) return;
+  const work = sets.find(x => !x.warmup); const next = work ? (work.load === "" ? null : work.load) : null;
+  const loads = HZ.warmupLoads(ex, warm.length, next);
+  warm.forEach((x, k) => { if (!x.manual && x.reps == null) x.load = loads[k] ?? x.load; });
+};
 HZ.buildSets = (ex, nWarm, nWork, next) => [
   ...HZ.warmupLoads(ex, nWarm, next).map(load => ({ load, reps:null, rir:null, warmup:true })),
   ...Array.from({ length:nWork }, () => ({ load: ex.type === "band" ? (next || "") : (next ?? null), reps:null, rir:null })) ];
-HZ.setText = (e, s) => (e.type === "band" ? HZ.bandName(s.load) : e.type === "kg" ? HZ.fmtKg(s.load) : (s.load ? "+" + HZ.fmtKg(s.load) : "MC")) + "×" + s.reps;
+HZ.setText = (e, s) => s.load === HZ.SCAP ? "aktywacja×" + s.reps : (e.type === "band" ? HZ.bandName(s.load) : e.type === "kg" ? HZ.fmtKg(s.load) : (s.load ? "+" + HZ.fmtKg(s.load) : "MC")) + "×" + s.reps;
 HZ.setsText = (e, withRir = true) => {
   const warm = HZ.warmSets(e), work = (e.sets || []).filter(s => !s.warmup);
   const w = warm.length ? "wstępne: " + warm.map(s => HZ.setText(e, s)).join(", ") + " | " : "";

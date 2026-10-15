@@ -87,13 +87,16 @@ function settingsView(){
         el("button", { class:"ghost", "aria-label":"Usuń ćwiczenie", onclick(){ c.exercises.splice(i, 1); render(); }, text:"✕" })),
       el("div", { class:"grid2" },
         el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).filter(([k]) => k !== "bw").map(([k,v]) => el("option", { value:k, text:v })))),
-        el("details", { class:"w1", style:"grid-column:1/-1", open: (e.warmStart || e.warmBand || e.warmLabel || e.warmReps) ? true : null },
+        el("details", { class:"w1", style:"grid-column:1/-1", open: (e.warmStart || (e.warmBand && e.warmBand !== HZ.SCAP) || e.warmLabel || e.warmReps || e.warmKgScap) ? true : null },
           el("summary", { text:"Seria wstępna W1 (ustalasz sam)" }),
           el("div", { class:"grid2", style:"margin-top:8px" },
             el("label", { class:"f" }, "Ciężar W1 (kg)", el("input", { id:`ex-ws-${e.id || i}`, inputmode:"decimal", value: e.warmStart ? HZ.fmtKg(e.warmStart) : "", placeholder:"np. 20 (gryf)", oninput(ev){ e.warmStart = HZ.parseNum(ev.target.value); } })),
             el("label", { class:"f" }, "Guma W1", el("select", { id:`ex-wb-${e.id || i}`, value: e.warmBand || HZ.SCAP, onchange(ev){ e.warmBand = ev.target.value; } },
               el("option", { value:HZ.SCAP, text:"bez gumy (np. aktywacja)" }), el("option", { value:"auto", text:"najmocniejsza guma" }),
               c.bands.filter(b => b.name.trim()).map(b => el("option", { value:b.id, text:b.name })))),
+            el("label", { class:"row small", style:"grid-column:1/-1;flex-wrap:nowrap;cursor:pointer;gap:6px" },
+              el("input", { id:`ex-wk-${e.id || i}`, type:"checkbox", style:"width:auto", checked: e.warmKgScap || null, onchange(ev){ e.warmKgScap = ev.target.checked; } }),
+              el("span", { text:"Przy ciężarze W1 też bez obciążenia (np. dipy: aktywacja łopatek)" })),
             el("label", { class:"f" }, "Nazwa W1 (opcjonalnie)", el("input", { id:`ex-wl-${e.id || i}`, maxlength:"40", value:e.warmLabel || "", placeholder:"np. aktywacja łopatek", oninput(ev){ e.warmLabel = ev.target.value; } })),
             el("label", { class:"f" }, "Powtórzenia W1", el("input", { id:`ex-wr-${e.id || i}`, maxlength:"10", value:e.warmReps || "", placeholder:"np. 6–8", oninput(ev){ e.warmReps = ev.target.value; } })))),
         el("label", { class:"f" }, "Skok ciężaru (kg)", el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" },
@@ -147,7 +150,7 @@ function settingsView(){
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
-    warmBand: e.warmBand || HZ.SCAP, warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
+    warmBand: e.warmBand || HZ.SCAP, warmKgScap: !!e.warmKgScap, warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
   const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null, kgMax: Number(b.kgMax) > Number(b.kg) ? Math.round(Number(b.kgMax) * 10) / 10 : null }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
   if (error){ toast(HZ.dbError(error)); return false; }
