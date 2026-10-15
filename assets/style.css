@@ -43,7 +43,12 @@ header.top{display:flex;justify-content:space-between;align-items:center;gap:12p
 .tabs button{flex:1 0 auto;border:0;background:none;color:var(--muted);font:600 .9rem var(--body);padding:8px 12px;border-radius:999px;cursor:pointer;white-space:nowrap}
 .tabs button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
-.station{border-left:5px solid var(--accent)}
+.station{border-left:5px solid var(--hold)}
+.station.main{border-left-color:var(--accent)}
+.sechead{display:flex;align-items:baseline;gap:10px;padding-top:6px;border-bottom:2px solid var(--ink);padding-bottom:4px}
+.sec-edit{padding-top:6px}
+.chip.main{border-color:var(--accent);color:var(--accent)}
+button.small{font-size:.8rem}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .between{justify-content:space-between}
 .stack{display:flex;flex-direction:column;gap:8px;min-width:0}

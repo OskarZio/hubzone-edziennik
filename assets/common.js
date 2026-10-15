@@ -75,6 +75,15 @@ HZ.fmtDate = (iso, long) => { if (!iso) return ""; const [y,m,d] = iso.split("-"
 HZ.LS = { get(k){ try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } }, set(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} } };
 let toastTimer;
 HZ.toast = msg => { document.querySelectorAll(".toast").forEach(t => t.remove()); const t = el("div", { class:"toast", role:"status", text:msg }); document.body.append(t); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 2800); };
+/* workout sections: main lifts first, then accessory stations */
+HZ.SECTIONS = [
+  { key:"main", title:"Trening główny", sub:"boje", item:"Bój", add:"+ Dodaj bój" },
+  { key:"acc", title:"Akcesoria", sub:"stacje", item:"Stacja", add:"+ Dodaj stację" }
+];
+HZ.secOf = st => st.section === "main" ? "main" : "acc";
+HZ.orderStations = stations => [...stations.filter(s => HZ.secOf(s) === "main"), ...stations.filter(s => HZ.secOf(s) !== "main")];
+HZ.stationLabels = stations => { const n = { main:0, acc:0 }, out = {};
+  for (const st of stations){ const k = HZ.secOf(st); n[k]++; out[st.id] = (k === "main" ? "Bój " : "Stacja ") + n[k]; } return out; };
 HZ.TYPE_LABEL = { kg:"ciężar (kg)", band:"guma (asysta)", bw:"masa ciała" };
 HZ.plural = (n, one, few, many) => n === 1 ? one : (n%10 >= 2 && n%10 <= 4 && (n%100 < 10 || n%100 >= 20)) ? few : many;
 
@@ -85,6 +94,7 @@ HZ.brand = (sub) => el("div", { class:"brand" }, el("span", { class:"mark", "ari
 const S = HZ.S = { config:{ exercises:[], bands:[] }, workouts:[] };
 HZ.exById = id => S.config.exercises.find(e => e.id === id);
 HZ.bandIdx = id => S.config.bands.findIndex(b => b.id === id);
+HZ.bandFull = id => { const b = S.config.bands.find(b => b.id === id); return b ? b.name + (b.kg ? ` (~${HZ.fmtKg(b.kg)} kg)` : "") : HZ.bandName(id); };
 HZ.bandName = id => { if (id === "none") return "bez gumy"; const b = S.config.bands.find(b => b.id === id); return b ? b.name : "?"; };
 HZ.sortedWorkouts = () => [...S.workouts].sort((a,b) => (a.date||"").localeCompare(b.date||""));
 HZ.workoutNo = id => HZ.sortedWorkouts().findIndex(w => w.id === id) + 1;
@@ -170,8 +180,8 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId) => {
       const i = bandIdx(load);
       if (load === "none" || i < 0) return { kind:"up", title:"Bez gumy: dołóż powtórzenie", text:last + ". Spróbuj zrobić o 1 powtórzenie więcej w każdej serii." + tiredNote, next:"none" };
       const nx = i + 1 >= bands.length ? "none" : bands[i + 1].id;
-      const options = [{ load:nx, label: nx === "none" ? "Bez gumy" : `Słabsza: ${bandName(nx)}`, rec:true }, { load, label:`Zostań: ${bandName(load)}`, rec:false }];
-      return { kind:"up", title: nx === "none" ? "Spróbuj bez gumy" : `Zmniejsz gumę → ${bandName(nx)}`,
+      const options = [{ load:nx, label: nx === "none" ? "Bez gumy" : `Słabsza: ${HZ.bandFull(nx)}`, rec:true }, { load, label:`Zostań: ${HZ.bandFull(load)}`, rec:false }];
+      return { kind:"up", title: nx === "none" ? "Spróbuj bez gumy" : `Zmniejsz gumę → ${HZ.bandFull(nx)}`,
         text:`${last}. Po zmianie gumy celuj w ${reps} powt. w serii.` + tiredNote, next:nx, options, reps };
     }
     if (small) return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:last + ". Serie wyszły, ale blisko upadku. Powtórz i celuj w RIR 2.", next:load };
@@ -183,7 +193,7 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId) => {
   if (missedTwice){
     if (type === "kg"){ const nx = Math.max(0, (load||0) - hi); return { kind:"down", title:`Zmniejsz o ${fmtKg(hi)} kg → ${fmtKg(nx)} kg`, text:last + ". Drugi raz z rzędu zabrakło powtórzeń.", next:nx }; }
     if (type === "band"){ const i = load === "none" ? bands.length : bandIdx(load); const nx = i > 0 ? bands[i-1].id : load;
-      return { kind:"down", title: nx === load ? "Zostań przy tej gumie" : `Mocniejsza guma → ${bandName(nx)}`, text:last + ". Drugi raz z rzędu zabrakło powtórzeń.", next:nx }; }
+      return { kind:"down", title: nx === load ? "Zostań przy tej gumie" : `Mocniejsza guma → ${HZ.bandFull(nx)}`, text:last + ". Drugi raz z rzędu zabrakło powtórzeń.", next:nx }; }
   }
   return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:last + `. Zabrakło powtórzeń do celu ${entry.targetSets || ""}×${entry.targetReps || ""}. Spróbuj domknąć wszystkie serie.`, next:load };
 };
@@ -195,7 +205,7 @@ HZ.fatiguePicker = (cur, onPick) => el("div", { class:"fatigue", role:"group", "
   Array.from({ length:10 }, (_,i) => i+1).map(n => el("button", { type:"button", "aria-pressed":String(cur === n), onclick(){ onPick(cur === n ? null : n); }, text:n })));
 HZ.loadInput = (ex, val, onVal, id) => {
   if (ex.type === "band") return el("select", { id, "aria-label":"Guma", value: val || "", onchange(e){ onVal(e.target.value || null); } },
-    el("option", { value:"", text:"–" }), S.config.bands.map(b => el("option", { value:b.id, text:b.name })), el("option", { value:"none", text:"bez gumy" }));
+    el("option", { value:"", text:"–" }), S.config.bands.map(b => el("option", { value:b.id, text: b.name + (b.kg ? ` ~${HZ.fmtKg(b.kg)} kg` : "") })), el("option", { value:"none", text:"bez gumy" }));
   return el("input", { id, inputmode:"decimal", placeholder: ex.type === "bw" ? "+kg" : "kg", "aria-label": ex.type === "bw" ? "Dodatkowe obciążenie" : "Ciężar w kg",
     value: val == null ? "" : HZ.fmtKg(val), onchange(e){ onVal(HZ.parseNum(e.target.value)); } });
 };
