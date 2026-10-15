@@ -97,7 +97,7 @@ function settingsView(){
             el("label", { class:"row small", style:"grid-column:1/-1;flex-wrap:nowrap;cursor:pointer;gap:6px" },
               el("input", { id:`ex-wk-${e.id || i}`, type:"checkbox", style:"width:auto", checked: e.warmKgScap || null, onchange(ev){ e.warmKgScap = ev.target.checked; } }),
               el("span", { text:"Przy ciężarze W1 też bez obciążenia (np. dipy: aktywacja łopatek)" })),
-            el("label", { class:"f" }, "Nazwa W1 (opcjonalnie)", el("input", { id:`ex-wl-${e.id || i}`, maxlength:"40", value:e.warmLabel || "", placeholder:"np. aktywacja łopatek", oninput(ev){ e.warmLabel = ev.target.value; } })),
+            el("label", { class:"f" }, "Tekst W1 (zamiast ciężaru / gumy)", el("input", { id:`ex-wl-${e.id || i}`, maxlength:"40", value:e.warmLabel || "", placeholder:"np. podciąganie bez ciężaru", oninput(ev){ e.warmLabel = ev.target.value; } })),
             el("label", { class:"f" }, "Powtórzenia W1", el("input", { id:`ex-wr-${e.id || i}`, maxlength:"10", value:e.warmReps || "", placeholder:"np. 6–8", oninput(ev){ e.warmReps = ev.target.value; } })))),
         el("label", { class:"f" }, "Skok ciężaru (kg)", el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" },
           el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),
