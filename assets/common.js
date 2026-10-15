@@ -283,7 +283,7 @@ HZ.loadInput = (ex, val, onVal, id) => {
 HZ.rirSelect = (val, onVal, id) => el("select", { id, "aria-label":"Zapas powtórzeń (RIR)", value: val == null ? "" : String(val), onchange(e){ onVal(e.target.value === "" ? null : Number(e.target.value)); } },
   el("option", { value:"", text:"–" }), [0,1,2,3,4,5].map(n => el("option", { value:String(n), text: n === 5 ? "5+" : String(n) })));
 HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
-  const head = el("div", { class:"set head" }, el("span", { text:"Seria" }), el("span", { text: ex.type === "band" ? "Guma" : ex.type === "bw" ? "Dociąż." : "Ciężar" }), el("span", { text:"Powt." }), el("span", { text:"RIR" }));
+  const head = el("div", { class:"set head" }, el("span", { text:"#" }), el("span", { text: ex.type === "band" ? "Guma" : ex.type === "bw" ? "Dociąż." : "Ciężar" }), el("span", { text:"Powt." }), el("span", { text:"RIR" }));
   let wn = 0, rn = 0;
   const warmIdx = i => sets.slice(0, i).filter(x => x.warmup).length;
   const rows = sets.map((s, i) => {
