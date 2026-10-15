@@ -123,7 +123,7 @@ function todayView(){
 function freshSets(w, st, ex, mode){
   const mx = { ...ex, type:mode };
   const sg = HZ.suggest(C.logs, ex.id, mode, ex, w.id);
-  return HZ.buildSets(mx, st.warmup || 0, st.sets || 3, sg.next ?? null);
+  return HZ.buildSets(mx, HZ.secOf(st) === "main" ? (st.warmup || 0) : 0, st.sets || 3, sg.next ?? null);
 }
 function stationCard(w, st, exBase, label, d){
   d.mode = d.mode || {};
@@ -131,7 +131,9 @@ function stationCard(w, st, exBase, label, d){
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
   const sg = HZ.suggest(C.logs, ex.id, mode, exBase, w.id);
   const curLoad = (sets.find(s => !s.warmup) || {}).load;
-  const extra = [st.warmup ? `+ ${st.warmup} ${HZ.plural(st.warmup, "seria wstępna", "serie wstępne", "serii wstępnych")}` : null, st.work ? `praca ${st.work}` : null, st.rest ? `przerwa ${st.rest}` : null, st.note].filter(Boolean);
+  const isMain = HZ.secOf(st) === "main";
+  if (!isMain && sets.some(x => x.warmup)){ const keep = sets.filter(x => !x.warmup); sets.length = 0; sets.push(...keep); }
+  const extra = [isMain && st.warmup ? `+ ${st.warmup} ${HZ.plural(st.warmup, "seria wstępna", "serie wstępne", "serii wstępnych")}` : null, st.work ? `praca ${st.work}` : null, st.rest ? `przerwa ${st.rest}` : null, st.note].filter(Boolean);
   return el("section", { class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") },
     el("div", { class:"row between", style:"align-items:flex-start" },
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", { text:ex.name })),
@@ -139,7 +141,7 @@ function stationCard(w, st, exBase, label, d){
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
     HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),
-    HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); }, { repsHint:sg.reps }));
+    HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); }, { repsHint:sg.reps, noWarmup:!isMain }));
 }
 function cleanSets(sets){ return sets.filter(s => s.reps != null).map(s => ({ load: s.load === "" ? null : s.load ?? null, reps:s.reps, rir: s.warmup ? null : (s.rir ?? null), ...(s.warmup ? { warmup:true } : {}) })); }
 async function saveWorkout(w, d, btn){

@@ -190,7 +190,7 @@ function workoutEditor(){
             el("button", { class:"ghost", "aria-label":"W dół", disabled:j === items.length - 1, onclick(){ swap(items[j+1]); }, text:"↓" }),
             el("button", { class:"ghost", "aria-label":"Usuń", onclick(){ w.stations.splice(gi, 1); render(); }, text:"✕" })),
           el("div", { class:"grid3" },
-            el("label", { class:"f" }, "Serie wstępne", el("input", { id:`st-wu-${s.id}`, inputmode:"numeric", placeholder:"0", value: s.warmup ? String(s.warmup) : "", oninput(e){ s.warmup = Math.min(6, Math.max(0, Math.round(HZ.parseNum(e.target.value) || 0))); } })),
+            sec.key !== "main" ? null : el("label", { class:"f" }, "Serie wstępne", el("input", { id:`st-wu-${s.id}`, inputmode:"numeric", placeholder:"0", value: s.warmup ? String(s.warmup) : "", oninput(e){ s.warmup = Math.min(6, Math.max(0, Math.round(HZ.parseNum(e.target.value) || 0))); } })),
             el("label", { class:"f" }, "Serie robocze", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
             el("label", { class:"f" }, "Powtórzenia", el("input", { id:`st-r-${s.id}`, inputmode:"numeric", value:String(s.reps || ""), oninput(e){ s.reps = Math.round(HZ.parseNum(e.target.value) || 0); } })),
             el("label", { class:"f" }, sec.key === "main" ? "Czas" : "Czas na stacji", el("input", { id:`st-w-${s.id}`, maxlength:"30", value:s.work || "", placeholder:"np. 8 min", oninput(e){ s.work = e.target.value; } })),
@@ -203,7 +203,7 @@ function workoutEditor(){
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jeden bój albo stację."); return; }
         const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(),
-          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), exId:s.exId, warmup:s.warmup || 0, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
+          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
         if (error){ toast(HZ.dbError(error)); render(); return; }

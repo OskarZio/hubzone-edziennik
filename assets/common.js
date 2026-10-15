@@ -234,9 +234,9 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
-    el("button", { type:"button", class:"ghost", onclick(){ const lastW = sets.filter(s => s.warmup).pop();
+    opts.noWarmup ? null : el("button", { type:"button", class:"ghost", onclick(){ const lastW = sets.filter(s => s.warmup).pop();
       sets.splice(nWarm, 0, { load: lastW ? lastW.load : (ex.type === "band" ? "" : null), reps:null, rir:null, warmup:true }); onChange(true); }, text:"+ wstępna" }),
-    nWarm ? el("button", { type:"button", class:"ghost", onclick(){ sets.splice(nWarm - 1, 1); onChange(true); }, text:"− wstępna" }) : null,
+    nWarm && !opts.noWarmup ? el("button", { type:"button", class:"ghost", onclick(){ sets.splice(nWarm - 1, 1); onChange(true); }, text:"− wstępna" }) : null,
     el("button", { type:"button", class:"ghost", onclick(){ const last = sets.filter(s => !s.warmup).pop(); sets.push({ load: last ? last.load : null, reps:null, rir:null }); onChange(true); }, text:"+ seria" }),
     nWork > 1 ? el("button", { type:"button", class:"ghost", onclick(){ sets.pop(); onChange(true); }, text:"− seria" }) : null);
   return el("div", { class:"sets" }, head, rows, ctl);
