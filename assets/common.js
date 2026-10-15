@@ -148,10 +148,29 @@ HZ.history = (logs, exId, excludeWorkoutId, type) => {
 /* warm-up sets (warmup:true) never count towards progression or charts */
 HZ.workEntry = e => { const sets = (e.sets || []).filter(s => !s.warmup); return sets.length ? { ...e, sets } : null; };
 HZ.warmSets = e => (e.sets || []).filter(s => s.warmup);
+/* warm-up ramp (trainer's scheme):
+   W1 = movement practice: empty bar / strongest band, 5–6 reps
+   W2 ≈ 60% of working weight, 3–4 reps
+   W3 ≈ 80% (70–80%), 1–2 reps   e.g. working 90 kg → 72,5 kg  (75 kg would be 83%) */
+HZ.WARM_REPS = (i, n) => i === 0 ? "5–6" : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
+HZ.warmPct = (i, n) => n === 1 ? 0.5 : i === 0 ? 0.45 : n === 2 ? 0.6 : n === 3 ? [0.45, 0.6, 0.8][i] : 0.5 + 0.3 * (i - 1) / (n - 2);
 HZ.warmupLoads = (ex, n, next) => {
-  if (ex.type !== "kg" || next == null || !n) return Array(n).fill(ex.type === "band" ? "" : null);
-  const step = HZ.incRange(ex)[0];
-  return Array.from({ length:n }, (_, i) => { const pct = n === 1 ? 0.6 : 0.5 + 0.3 * i / (n - 1); return Math.max(0, Math.floor(next * pct / step) * step); });
+  if (!n) return [];
+  if (ex.type === "band"){
+    const bands = S.config.bands; if (!bands.length) return Array(n).fill("");
+    let w = next === "none" ? bands.length : HZ.bandIdx(next); if (w < 0) w = bands.length;
+    const top = Math.max(0, w - 1);                       // last warm-up: one band stronger than the working one
+    return Array.from({ length:n }, (_, i) => bands[Math.min(bands.length - 1, n === 1 ? 0 : Math.round(top * i / (n - 1)))].id);
+  }
+  if (ex.type !== "kg") return Array(n).fill(null);
+  const step = HZ.incRange(ex)[0], start = Number(ex.warmStart) > 0 ? Number(ex.warmStart) : null;
+  const r = v => Math.max(0, Math.round(v / step) * step);
+  if (next == null) return Array.from({ length:n }, (_, i) => i === 0 && start ? start : null);
+  return Array.from({ length:n }, (_, i) => {
+    if (i === 0 && start != null) return Math.min(start, next);
+    const v = r(next * HZ.warmPct(i, n));
+    return start != null ? Math.min(next, Math.max(start, v)) : v;
+  });
 };
 HZ.workLoad = e => {
   const c = new Map(); for (const s of e.sets){ const k = JSON.stringify(s.load ?? null); c.set(k, (c.get(k)||0) + 1); }
@@ -245,6 +264,7 @@ HZ.rirSelect = (val, onVal, id) => el("select", { id, "aria-label":"Zapas powtó
 HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
   const head = el("div", { class:"set head" }, el("span", { text:"Seria" }), el("span", { text: ex.type === "band" ? "Guma" : ex.type === "bw" ? "Dociąż." : "Ciężar" }), el("span", { text:"Powt." }), el("span", { text:"RIR" }));
   let wn = 0, rn = 0;
+  const warmIdx = i => sets.slice(0, i).filter(x => x.warmup).length;
   const rows = sets.map((s, i) => {
     const sw = ex.type === "band" && s.load && s.load !== "none" ? (S.config.bands.find(b => b.id === s.load) || {}).color : null;
     const label = s.warmup ? "W" + (++wn) : String(++rn);
@@ -254,14 +274,18 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
         HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v;
           for (let j = i+1; j < sets.length; j++) if (!!sets[j].warmup === !!s.warmup && (JSON.stringify(sets[j].load) === JSON.stringify(old) || sets[j].load == null || sets[j].load === "")) sets[j].load = v;
           onChange(true); }, `${keyPrefix}-l${i}`)),
-      el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: !s.warmup && opts.repsHint ? opts.repsHint : "–", "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
+      el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
       s.warmup ? el("span", { class:"wlabel", text:"wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
-    opts.noWarmup ? null : el("button", { type:"button", class:"ghost", onclick(){ const lastW = sets.filter(s => s.warmup).pop();
-      sets.splice(nWarm, 0, { load: lastW ? lastW.load : (ex.type === "band" ? "" : null), reps:null, rir:null, warmup:true }); onChange(true); }, text:"+ wstępna" }),
+    opts.noWarmup ? null : el("button", { type:"button", class:"ghost", onclick(){
+      const work = sets.find(s => !s.warmup); const warm = sets.filter(s => s.warmup);
+      sets.splice(nWarm, 0, { load:null, reps:null, rir:null, warmup:true });
+      if (work && warm.every(s => s.reps == null)){ const loads = HZ.warmupLoads(ex, nWarm + 1, work.load === "" ? null : work.load); sets.filter(s => s.warmup).forEach((s, k) => { s.load = loads[k] ?? s.load; }); }
+      else { const lastW = warm[warm.length - 1]; sets[nWarm].load = lastW ? lastW.load : (ex.type === "band" ? "" : null); }
+      onChange(true); }, text:"+ wstępna" }),
     nWarm && !opts.noWarmup ? el("button", { type:"button", class:"ghost", onclick(){ sets.splice(nWarm - 1, 1); onChange(true); }, text:"− wstępna" }) : null,
     el("button", { type:"button", class:"ghost", onclick(){ const last = sets.filter(s => !s.warmup).pop(); sets.push({ load: last ? last.load : null, reps:null, rir:null }); onChange(true); }, text:"+ seria" }),
     nWork > 1 ? el("button", { type:"button", class:"ghost", onclick(){ sets.pop(); onChange(true); }, text:"− seria" }) : null);
@@ -290,7 +314,7 @@ HZ.modeToggle = (cur, onPick) => el("div", { class:"modes", role:"group", "aria-
 HZ.applyLoad = (ex, sets, load) => {
   for (const s of sets) if (!s.warmup) s.load = load;
   const warm = sets.filter(s => s.warmup);
-  if (ex.type === "kg" && warm.every(s => s.reps == null)) HZ.warmupLoads(ex, warm.length, load).forEach((l, k) => { warm[k].load = l; });
+  if ((ex.type === "kg" || ex.type === "band") && warm.every(s => s.reps == null)) HZ.warmupLoads(ex, warm.length, load).forEach((l, k) => { warm[k].load = l; });
 };
 HZ.buildSets = (ex, nWarm, nWork, next) => [
   ...HZ.warmupLoads(ex, nWarm, next).map(load => ({ load, reps:null, rir:null, warmup:true })),
