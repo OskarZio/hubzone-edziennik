@@ -1,10 +1,9 @@
-// Wklej tu konfigurację z Firebase: Project settings → General → Your apps → Web app → "firebaseConfig".
-// Te dane są publiczne z założenia: dostęp do danych chronią reguły w pliku firestore.rules.
+// Konfiguracja projektu Firebase (publiczna z założenia; dostęp chronią reguły w firestore.rules).
 window.HZ_FIREBASE = {
-  apiKey: "TWOJ_API_KEY",
-  authDomain: "TWOJ-PROJEKT.firebaseapp.com",
-  projectId: "TWOJ-PROJEKT",
-  storageBucket: "TWOJ-PROJEKT.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:0000000000000000"
+  apiKey: "AIzaSyAbES0a25a3s3rv8HsdD9jbzo0OqU5nNFY",
+  authDomain: "hubzone-e-dziennikk.firebaseapp.com",
+  projectId: "hubzone-e-dziennikk",
+  storageBucket: "hubzone-e-dziennikk.firebasestorage.app",
+  messagingSenderId: "1033337097749",
+  appId: "1:1033337097749:web:0ad9ce830a57ebf4c4c81c"
 };
