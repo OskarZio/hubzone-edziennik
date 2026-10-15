@@ -88,9 +88,9 @@ function settingsView(){
       el("div", { class:"grid2" },
         el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).map(([k,v]) => el("option", { value:k, text:v })))),
         el("label", { class:"f" }, "Skok ciężaru (kg)", el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" },
-          el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),
+          el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),
           el("span", { text:"–" }),
-          el("select", { id:`ex-hi-${e.id || i}`, "aria-label":"Skok do", value:String(HZ.incRange(e)[1]), onchange(ev){ e.incMax = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))))))))),
+          el("select", { id:`ex-hi-${e.id || i}`, "aria-label":"Skok do", value:String(HZ.incRange(e)[1]), onchange(ev){ e.incMax = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))))))))),
     el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", incMin:1.25, incMax:2.5 }); render(); }, text:"+ Dodaj ćwiczenie" }));
   const bandCard = el("div", { class:"card" }, el("h2", { text:"Gumy" }),
     el("p", { class:"small muted", text:"Ułóż od najmocniejszej (największa pomoc) do najsłabszej. W polu kg wpisz, ile mniej więcej odciąża guma: jedną liczbę (15) albo zakres (3-5). Klient zobaczy to przy wyborze gumy, a podpowiedź przesuwa go w dół listy." }),

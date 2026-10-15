@@ -179,7 +179,7 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId) => {
       const base = load || 0, rec = small ? lo : hi;
       const options = (lo === hi ? [lo] : [lo, hi]).map(a => ({ load: base + a, label:`+${fmtKg(a)} → ${fmtKg(base + a)} kg`, rec: a === rec }));
       return { kind:"up", title: lo === hi ? `Dołóż ${fmtKg(lo)} kg` : `Dołóż ${fmtKg(lo)}–${fmtKg(hi)} kg`,
-        text:`${last}. Polecam +${fmtKg(rec)} kg (${minRir == null ? "nie wpisano RIR" : small ? "mały zapas" : "był zapas"}). Po przeskoku celuj w ${reps} powt. w serii.` + tiredNote, next: base + rec, options, reps };
+        text:`${last}. Polecam +${fmtKg(rec)} kg (${minRir == null ? "nie wpisano RIR" : small ? "mały zapas" : "był zapas"}). Po przeskoku celuj w ${reps} powt. w serii.` + tiredNote, next: base + rec, options, reps, base };
     }
     if (type === "band"){
       const i = bandIdx(load);
@@ -244,7 +244,18 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
 HZ.tipBox = (sg, onPick, current) => el("div", { class:"tip " + sg.kind }, el("span", { class:"ic", "aria-hidden":"true", text:{ up:"↑", hold:"=", down:"↓", first:"•" }[sg.kind] }),
   el("div", { class:"stack", style:"gap:6px" }, el("div", {}, el("b", { text:sg.title }), el("span", { text:sg.text })),
     onPick && sg.options && sg.options.length > 1 ? el("div", { class:"chips" }, sg.options.map(o => el("button", { type:"button", class:"pick",
-      "aria-pressed":String(JSON.stringify(current) === JSON.stringify(o.load)), onclick(){ onPick(o.load); }, text: o.label + (o.rec ? " · polecane" : "") }))) : null));
+      "aria-pressed":String(JSON.stringify(current) === JSON.stringify(o.load)), onclick(){ onPick(o.load); }, text: o.label + (o.rec ? " · polecane" : "") }))) : null,
+    onPick && sg.base != null ? customJump(sg, onPick, current) : null));
+/* participant's own jump, e.g. +0,5 or +5 kg */
+function customJump(sg, onPick, current){
+  const isCustom = typeof current === "number" && !(sg.options || []).some(o => o.load === current);
+  const inp = el("input", { type:"text", inputmode:"decimal", "aria-label":"Własny skok w kg", placeholder:"np. 0,5",
+    value: isCustom && current > sg.base ? HZ.fmtKg(Math.round((current - sg.base) * 100) / 100) : "", style:"width:5rem;text-align:center;padding:6px 8px" });
+  const go = () => { const v = HZ.parseNum(inp.value); if (v == null || v < 0 || v > 50){ HZ.toast("Wpisz skok od 0 do 50 kg, np. 0,5."); return; } onPick(Math.round((sg.base + v) * 100) / 100); };
+  inp.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); go(); } });
+  return el("div", { class:"row small", style:"gap:6px" }, el("span", { text:"Własny skok: +" }), inp, el("span", { text:"kg" }),
+    el("button", { type:"button", class:"pick", "aria-pressed":String(isCustom), onclick: go, text: isCustom ? `→ ${HZ.fmtKg(current)} kg` : "Ustaw" }));
+}
 /* participant picks how they do the exercise: weight, band or bodyweight */
 HZ.MODE_LABEL = { kg:"Ciężar", band:"Guma", bw:"Masa ciała" };
 HZ.modeToggle = (cur, onPick) => el("div", { class:"modes", role:"group", "aria-label":"Sposób wykonania" },
