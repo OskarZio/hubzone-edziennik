@@ -156,7 +156,7 @@ function settingsView(){
         if (error){ toast(HZ.dbError(error)); ev.target.checked = !on; ev.target.disabled = false; return; }
         S.config.rankingEnabled = on; toast(on ? "Ranking włączony" : "Ranking wyłączony"); render(); } }),
       el("span", { text:"Pokaż klientom ranking i tabelę ogólną" })));
-  return [exCard, bandCard, save, codeCard, ownCard, rankCard];
+  return [exCard, bandCard, save, codeCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,

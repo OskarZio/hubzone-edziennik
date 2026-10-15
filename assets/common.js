@@ -53,6 +53,29 @@ HZ.api = {
   deleteWorkout: id => wrap(() => db.doc("workouts/" + id).delete())
 };
 
+/* ---------- theme (per device): light / dark / auto + accent colour ---------- */
+HZ.ACCENTS = {
+  orange:{ name:"Pomarańczowy", light:["#D9480F","#FBE3D6","#FFFFFF"], dark:["#FF7A45","#3A2016","#1A0D06"] },
+  red:   { name:"Czerwony",     light:["#C92A3A","#F9DDE0","#FFFFFF"], dark:["#FF6B7A","#3A1A1F","#1A0608"] },
+  blue:  { name:"Niebieski",    light:["#1C64C8","#DCE9FB","#FFFFFF"], dark:["#5CA3FF","#16263F","#06101E"] },
+  teal:  { name:"Turkusowy",    light:["#0B7F7A","#D3F0EE","#FFFFFF"], dark:["#3CCFC6","#123130","#04191A"] },
+  green: { name:"Zielony",      light:["#2F8A2F","#DDF2DB","#FFFFFF"], dark:["#6ACB5F","#1A3319","#081A07"] },
+  purple:{ name:"Fioletowy",    light:["#7340C9","#ECE2FA","#FFFFFF"], dark:["#B08CFF","#2A1F40","#120A22"] },
+  pink:  { name:"Różowy",       light:["#C2256F","#F9DDEA","#FFFFFF"], dark:["#FF6FAE","#3A1828","#1E0812"] },
+  gold:  { name:"Złoty",        light:["#A86A00","#F7EAD0","#FFFFFF"], dark:["#F2B33D","#3A2B10","#1C1302"] }
+};
+HZ.getTheme = () => { let t = null; try { t = JSON.parse(localStorage.getItem("hz-theme")); } catch(e){} return { mode:(t && t.mode) || "auto", accent:(t && HZ.ACCENTS[t.accent] ? t.accent : "orange") }; };
+HZ.applyTheme = () => {
+  const t = HZ.getTheme(), root = document.documentElement;
+  if (t.mode === "auto") root.removeAttribute("data-theme"); else root.setAttribute("data-theme", t.mode);
+  const dark = t.mode === "dark" || (t.mode === "auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
+  const [acc, soft, ink] = HZ.ACCENTS[t.accent][dark ? "dark" : "light"];
+  root.style.setProperty("--accent", acc); root.style.setProperty("--accent-soft", soft); root.style.setProperty("--accent-ink", ink);
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute("content", dark ? "#0F1418" : "#14202A");
+};
+HZ.setTheme = patch => { const t = { ...HZ.getTheme(), ...patch }; try { localStorage.setItem("hz-theme", JSON.stringify(t)); } catch(e){} HZ.applyTheme(); };
+try { HZ.applyTheme(); if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", HZ.applyTheme); } catch(e){}
+
 /* ---------- DOM helpers ---------- */
 const SVGNS = "http://www.w3.org/2000/svg";
 function el(tag, props, ...kids){
@@ -112,6 +135,19 @@ HZ.swap = (app, nodes) => {
   const y = window.scrollY, a = document.activeElement, id = a && a.id, sel = a && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
   app.replaceChildren(...nodes.filter(Boolean)); window.scrollTo(0, y);
   if (id){ const n = document.getElementById(id); if (n && n !== a){ n.focus({ preventScroll:true }); if (sel && typeof n.setSelectionRange === "function") try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
+};
+/* appearance card: theme + accent */
+HZ.themeCard = rerender => {
+  const t = HZ.getTheme();
+  return el("div", { class:"card" }, el("h3", { text:"Wygląd" }),
+    el("div", { class:"stack", style:"gap:6px" }, el("span", { class:"eyebrow", text:"Motyw" }),
+      el("div", { class:"modes", role:"group", "aria-label":"Motyw" },
+        [["auto","Jak w telefonie"],["light","Jasny"],["dark","Ciemny"]].map(([k, label]) => el("button", { type:"button", "aria-pressed":String(t.mode === k), onclick(){ HZ.setTheme({ mode:k }); rerender(); }, text:label })))),
+    el("div", { class:"stack", style:"gap:6px" }, el("span", { class:"eyebrow", text:"Kolor akcentu" }),
+      el("div", { class:"swatches", role:"group", "aria-label":"Kolor akcentu" },
+        Object.entries(HZ.ACCENTS).map(([k, a]) => el("button", { type:"button", title:a.name, "aria-label":a.name, "aria-pressed":String(t.accent === k),
+          style:`background:${a.light[0]}`, onclick(){ HZ.setTheme({ accent:k }); rerender(); } }))),
+      el("span", { class:"small muted", text:`Wybrany: ${HZ.ACCENTS[t.accent].name}. Ustawienie zapisuje się na tym urządzeniu.` })));
 };
 HZ.brand = (sub) => el("div", { class:"brand" }, el("img", { class:"mark logo", src:"assets/icons/icon-192.png", alt:"", width:"44", height:"44" }),
   el("span", { class:"bt" }, el("b", { text:"Hubzone Weightlifting" }), el("span", { text: sub || "e-Dziennik" })));

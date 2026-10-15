@@ -9,11 +9,17 @@
   --r:10px;
   color-scheme:light;
 }
-@media (prefers-color-scheme: dark){:root{
+/* theme: follows the phone unless the user picks one in Konto (data-theme on <html>) */
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0F1418; --surface:#18212A; --sunk:#131A21; --ink:#E7ECF0; --muted:#94A3AE; --line:#2B3742;
   --accent:#FF7A45; --accent-ink:#1A0D06; --accent-soft:#3A2016;
   --good:#5CCB72; --good-soft:#163222; --hold:#8FA9EC; --hold-soft:#1C2742; --bad:#FF7B7B; --bad-soft:#3A1A1A;
   color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1418; --surface:#18212A; --sunk:#131A21; --ink:#E7ECF0; --muted:#94A3AE; --line:#2B3742;
+  --accent:#FF7A45; --accent-ink:#1A0D06; --accent-soft:#3A2016;
+  --good:#5CCB72; --good-soft:#163222; --hold:#8FA9EC; --hold-soft:#1C2742; --bad:#FF7B7B; --bad-soft:#3A1A1A;
+  color-scheme:dark}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);
@@ -147,5 +153,9 @@ table.rank tr.me td{background:var(--accent-soft)}
 button.thsort{background:none;border:0;padding:0;font:inherit;color:inherit;text-transform:inherit;letter-spacing:inherit;cursor:pointer}
 .stat.cmp.up .v{color:var(--good)}
 .stat.cmp.down .v{color:var(--bad)}
+.swatches{display:flex;flex-wrap:wrap;gap:8px}
+.swatches button{width:40px;height:40px;border-radius:50%;padding:0;border:2px solid var(--line);position:relative}
+.swatches button[aria-pressed="true"]{border-color:var(--ink);box-shadow:0 0 0 2px var(--bg) inset}
+.swatches button[aria-pressed="true"]::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.5)}
 .auth{max-width:420px;width:100%;margin:6vh auto 0}
 @media (prefers-reduced-motion:no-preference){.toast{animation:pop .2s ease-out}@keyframes pop{from{opacity:0;transform:translate(-50%,8px)}}}

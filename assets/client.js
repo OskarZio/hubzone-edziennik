@@ -278,6 +278,7 @@ function accountView(){
       el("button", { async onclick(){ const n = nameIn.value.trim(); if (!n){ toast("Wpisz imię."); return; }
         const { error } = await HZ.api.updateName(C.session.user.id, n);
         if (error){ toast(HZ.dbError(error)); return; } C.profile.name = n; syncRanking(); toast("Zapisano imię"); render(); }, text:"Zapisz imię" })),
+    HZ.themeCard(render),
     el("div", { class:"card" }, el("h3", { text:"Zmień hasło" }), el("p", { class:"small muted", text:"Wyślemy na Twój e-mail link do ustawienia nowego hasła." }),
       el("button", { async onclick(ev){ ev.currentTarget.disabled = true; try { await HZ.resetPassword(C.session.user.email); toast("Wysłano link. Sprawdź skrzynkę."); } catch(e){ toast(HZ.authMsg(e)); } }, text:"Wyślij link do zmiany hasła" })),
     el("div", { class:"row" },
