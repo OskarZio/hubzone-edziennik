@@ -3,10 +3,42 @@
 "use strict";
 const HZ = window.HZ = {};
 
-/* ---------- Supabase ---------- */
-const cfg = window.HZ_CONFIG || {};
-HZ.configured = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY && !/TWOJ/.test(cfg.SUPABASE_URL + cfg.SUPABASE_ANON_KEY));
-HZ.sb = HZ.configured && window.supabase ? window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth:{ persistSession:true, autoRefreshToken:true, detectSessionInUrl:true } }) : null;
+/* ---------- Firebase ---------- */
+const cfg = window.HZ_FIREBASE || {};
+HZ.configured = !!(cfg.apiKey && cfg.projectId && !/TWOJ/.test(cfg.apiKey + cfg.projectId));
+let db = null, auth = null;
+if (HZ.configured && window.firebase){
+  firebase.initializeApp(cfg);
+  auth = firebase.auth(); db = firebase.firestore();
+  db.settings({ ignoreUndefinedProperties:true });
+  auth.languageCode = "pl";
+}
+HZ.ready = !!db;
+const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
+const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, created_at:d.createdAt || null } : null;
+HZ.api = {
+  /* auth */
+  onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email } } : null)); },
+  signOut: () => auth.signOut(),
+  /* profiles */
+  profile: uid => wrap(async () => { const s = await db.doc("users/" + uid).get(); return s.exists ? asProfile(uid, s.data()) : null; }),
+  createProfile: (uid, { name, email, joinCode }) => wrap(() => db.doc("users/" + uid).set({ name, email, isAdmin:false, joinCode, createdAt:new Date().toISOString() })),
+  updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
+  users: () => wrap(async () => (await db.collection("users").get()).docs.map(d => asProfile(d.id, d.data()))),
+  /* logs */
+  logsOf: uid => wrap(async () => list(await db.collection("logs").where("user_id", "==", uid).get())),
+  logsForWorkout: wid => wrap(async () => list(await db.collection("logs").where("workout_id", "==", wid).get())),
+  allLogs: () => wrap(async () => list(await db.collection("logs").get())),
+  saveWorkoutLog: row => wrap(async () => { const id = row.user_id + "_" + row.workout_id; await db.doc("logs/" + id).set(row); return { id, ...row }; }),
+  addOwnLog: row => wrap(async () => { const full = { ...row, saved_at:new Date().toISOString() }; const ref = await db.collection("logs").add(full); return { id:ref.id, ...full }; }),
+  /* trainer data */
+  saveLibrary: lib => wrap(() => db.doc("config/library").set(lib)),
+  getClub: () => wrap(async () => { const s = await db.doc("settings/club").get(); return s.exists ? (s.data().joinCode || null) : null; }),
+  setClub: code => wrap(() => db.doc("settings/club").set({ joinCode:code })),
+  saveWorkout: row => wrap(async () => { const { id, ...body } = row; await db.doc("workouts/" + id).set(body); return row; }),
+  deleteWorkout: id => wrap(() => db.doc("workouts/" + id).delete())
+};
 
 /* ---------- DOM helpers ---------- */
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -61,22 +93,16 @@ HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(lo
 
 /* ---------- data ---------- */
 HZ.loadConfig = async () => {
-  const [ex, bd] = await Promise.all([
-    HZ.sb.from("exercises").select("*").order("position"),
-    HZ.sb.from("bands").select("*").order("position")
-  ]);
-  if (ex.error) throw ex.error; if (bd.error) throw bd.error;
-  S.config = { exercises: ex.data.map(e => ({ ...e, inc:Number(e.inc) })), bands: bd.data };
+  const s = await db.doc("config/library").get(); const d = s.exists ? s.data() : {};
+  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, inc:Number(e.inc) || 0 })), bands:d.bands || [] };
 };
-HZ.loadWorkouts = async () => {
-  const r = await HZ.sb.from("workouts").select("*").order("date");
-  if (r.error) throw r.error; S.workouts = r.data;
-};
+HZ.loadWorkouts = async () => { S.workouts = list(await db.collection("workouts").get()); };
 HZ.dbError = (e) => {
-  console.error(e);
-  if (e && /JWT|session/i.test(e.message || "")) return "Sesja wygasła. Zaloguj się ponownie.";
-  if (e && (e.code === "42501" || /row-level security|permission/i.test(e.message || ""))) return "Brak uprawnień do tej operacji.";
-  if (e && /Failed to fetch|NetworkError/i.test(e.message || "")) return "Brak połączenia z internetem. Spróbuj ponownie.";
+  const c = (e && e.code) || "";
+  if (c === "permission-denied") return "Brak uprawnień do tej operacji.";
+  if (c === "unauthenticated") return "Sesja wygasła. Zaloguj się ponownie.";
+  if (c === "unavailable" || c === "deadline-exceeded") return "Brak połączenia z internetem. Spróbuj ponownie.";
+  if (c === "resource-exhausted") return "Przekroczono dzienny limit bazy. Spróbuj jutro.";
   return "Nie udało się zapisać. Spróbuj ponownie.";
 };
 
@@ -241,65 +267,72 @@ HZ.lineChart = (pts, { ticks, fmt }) => {
 
 /* ---------- auth screens ---------- */
 function authMsg(err){
-  const m = (err && err.message) || "";
-  if (/Invalid login credentials/i.test(m)) return "Nieprawidłowy e-mail lub hasło.";
-  if (/Email not confirmed/i.test(m)) return "Najpierw potwierdź adres e-mail (link w skrzynce).";
-  if (/already registered|already been registered/i.test(m)) return "To konto już istnieje. Zaloguj się.";
-  if (/Database error saving new user|invalid_join_code/i.test(m)) return "Nieprawidłowy kod klubu. Zapytaj trenera o aktualny kod.";
-  if (/Password should be at least/i.test(m)) return "Hasło musi mieć co najmniej 6 znaków.";
-  if (/rate limit|security purposes/i.test(m)) return "Za dużo prób. Odczekaj chwilę i spróbuj ponownie.";
-  if (/Failed to fetch/i.test(m)) return "Brak połączenia z internetem.";
+  const c = (err && err.code) || "";
+  if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return "Nieprawidłowy e-mail lub hasło.";
+  if (c === "auth/email-already-in-use") return "To konto już istnieje. Zaloguj się.";
+  if (c === "auth/weak-password") return "Hasło musi mieć co najmniej 6 znaków.";
+  if (c === "auth/invalid-email") return "Wpisz poprawny adres e-mail.";
+  if (c === "auth/too-many-requests") return "Za dużo prób. Odczekaj chwilę i spróbuj ponownie.";
+  if (c === "auth/network-request-failed") return "Brak połączenia z internetem.";
+  if (c === "auth/operation-not-allowed") return "Logowanie e-mailem nie jest włączone w Firebase (Authentication → Sign-in method).";
+  if (c === "hz/join-code") return "Nieprawidłowy kod klubu. Zapytaj trenera o aktualny kod.";
   return "Coś poszło nie tak. Spróbuj ponownie.";
 }
 HZ.authMsg = authMsg;
-/* mode: "login" | "register" | "forgot" | "recovery"; allowRegister=false on admin page */
+HZ.registering = null;
+/* mode: "login" | "register" | "forgot"; allowRegister=false on admin page */
 HZ.authView = ({ mode, allowRegister, onMode, title, sub }) => {
   const msg = el("p", { class:"small", role:"alert", style:"color:var(--bad)" });
   const info = el("p", { class:"notice", hidden:true });
-  const busy = (b, btn) => { btn.disabled = b; };
-  const field = (label, attrs) => el("label", { class:"f" }, label, el("input", attrs));
   const form = el("form", { class:"card", novalidate:true });
-  const heading = { login:"Zaloguj się", register:"Załóż konto", forgot:"Nie pamiętasz hasła?", recovery:"Ustaw nowe hasło" }[mode];
+  const heading = { login:"Zaloguj się", register:"Załóż konto", forgot:"Nie pamiętasz hasła?" }[mode];
   form.append(el("div", { class:"stack", style:"gap:4px" }, el("h2", { text: title || heading }), sub ? el("p", { class:"small muted", text:sub }) : null));
   const emailIn = el("input", { id:"au-email", type:"email", autocomplete:"email", required:true, value:HZ.LS.get("hz-email") || "" });
   const passIn = el("input", { id:"au-pass", type:"password", autocomplete: mode === "login" ? "current-password" : "new-password", minlength:"6", required:true });
   const nameIn = el("input", { id:"au-name", autocomplete:"given-name", maxlength:"60", placeholder:"np. Kasia" });
   const codeIn = el("input", { id:"au-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase" });
   if (mode === "register") form.append(el("label", { class:"f" }, "Imię", nameIn));
-  if (mode !== "recovery") form.append(el("label", { class:"f" }, "E-mail", emailIn));
-  if (mode !== "forgot") form.append(el("label", { class:"f" }, mode === "recovery" ? "Nowe hasło (min. 6 znaków)" : "Hasło", passIn));
+  form.append(el("label", { class:"f" }, "E-mail", emailIn));
+  if (mode !== "forgot") form.append(el("label", { class:"f" }, "Hasło (min. 6 znaków)", passIn));
   if (mode === "register") form.append(el("label", { class:"f" }, "Kod klubu", codeIn));
-  const submit = el("button", { type:"submit", class:"primary", text:{ login:"Zaloguj", register:"Załóż konto", forgot:"Wyślij link", recovery:"Zapisz hasło" }[mode] });
+  const submit = el("button", { type:"submit", class:"primary", text:{ login:"Zaloguj", register:"Załóż konto", forgot:"Wyślij link" }[mode] });
   form.append(msg, info, submit);
   const links = el("div", { class:"row between small" });
   if (mode === "login"){ if (allowRegister) links.append(el("button", { type:"button", class:"link", onclick(){ onMode("register"); }, text:"Nie masz konta? Załóż je" }));
     links.append(el("button", { type:"button", class:"link", onclick(){ onMode("forgot"); }, text:"Nie pamiętam hasła" })); }
-  else if (mode !== "recovery") links.append(el("button", { type:"button", class:"link", onclick(){ onMode("login"); }, text:"Wróć do logowania" }));
+  else links.append(el("button", { type:"button", class:"link", onclick(){ onMode("login"); }, text:"Wróć do logowania" }));
   form.append(links);
   form.addEventListener("submit", async ev => {
     ev.preventDefault(); msg.textContent = ""; info.hidden = true;
     const email = emailIn.value.trim().toLowerCase(), pass = passIn.value;
-    if (mode !== "recovery" && !/^\S+@\S+\.\S+$/.test(email)){ msg.textContent = "Wpisz poprawny adres e-mail."; return; }
-    if ((mode === "login" || mode === "register" || mode === "recovery") && pass.length < 6){ msg.textContent = "Hasło musi mieć co najmniej 6 znaków."; return; }
+    if (!/^\S+@\S+\.\S+$/.test(email)){ msg.textContent = "Wpisz poprawny adres e-mail."; return; }
+    if (mode !== "forgot" && pass.length < 6){ msg.textContent = "Hasło musi mieć co najmniej 6 znaków."; return; }
     if (mode === "register" && !nameIn.value.trim()){ msg.textContent = "Wpisz imię."; return; }
-    HZ.LS.set("hz-email", email); busy(true, submit);
-    const back = location.origin + location.pathname;
+    if (mode === "register" && !codeIn.value.trim()){ msg.textContent = "Wpisz kod klubu."; return; }
+    HZ.LS.set("hz-email", email); submit.disabled = true;
     try {
-      if (mode === "login"){ const { error } = await HZ.sb.auth.signInWithPassword({ email, password:pass }); if (error) throw error; }
+      if (mode === "login") await auth.signInWithEmailAndPassword(email, pass);
       if (mode === "register"){
-        const { data, error } = await HZ.sb.auth.signUp({ email, password:pass, options:{ emailRedirectTo:back, data:{ name:nameIn.value.trim(), join_code:codeIn.value.trim().toUpperCase() } } });
-        if (error) throw error;
-        if (!data.session){ info.textContent = "Konto założone. Sprawdź skrzynkę e-mail i kliknij link potwierdzający, a potem zaloguj się tutaj."; info.hidden = false; }
+        const name = nameIn.value.trim().slice(0, 60), joinCode = codeIn.value.trim().toUpperCase();
+        HZ.registering = (async () => {
+          const cred = await auth.createUserWithEmailAndPassword(email, pass);
+          const r = await HZ.api.createProfile(cred.user.uid, { name, email, joinCode });
+          if (r.error){
+            await cred.user.delete().catch(() => auth.signOut());
+            const e = new Error("profile"); e.code = r.error.code === "permission-denied" ? "hz/join-code" : r.error.code; throw e;
+          }
+        })();
+        try { await HZ.registering; } finally { HZ.registering = null; }
       }
-      if (mode === "forgot"){ const { error } = await HZ.sb.auth.resetPasswordForEmail(email, { redirectTo:back }); if (error) throw error;
-        info.textContent = "Jeśli konto istnieje, wysłaliśmy link do zmiany hasła. Sprawdź skrzynkę."; info.hidden = false; }
-      if (mode === "recovery"){ const { error } = await HZ.sb.auth.updateUser({ password:pass }); if (error) throw error; HZ.toast("Hasło zmienione"); onMode("done"); }
-    } catch(e){ msg.textContent = authMsg(e); }
-    busy(false, submit);
+      if (mode === "forgot"){ await auth.sendPasswordResetEmail(email);
+        info.textContent = "Jeśli konto istnieje, wysłaliśmy link do zmiany hasła. Sprawdź skrzynkę (także spam)."; info.hidden = false; }
+    } catch(e){ msg.textContent = authMsg(e); if (mode === "register") HZ.toast(authMsg(e)); }
+    submit.disabled = false;
   });
   return form;
 };
+HZ.resetPassword = email => auth.sendPasswordResetEmail(email);
 
 HZ.setupNeeded = () => [el("div", { class:"card" }, el("h2", { text:"Aplikacja nie jest jeszcze podłączona" }),
-  el("p", { text:"Uzupełnij adres projektu Supabase i klucz anon w pliku config.js. Instrukcja jest w README." }))];
+  el("p", { text:"Uzupełnij dane projektu Firebase w pliku config.js. Instrukcja jest w README." }))];
 })();

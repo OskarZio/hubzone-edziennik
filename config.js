@@ -1,7 +1,10 @@
-// Uzupełnij danymi z Supabase → Project Settings → API.
-// Klucz "anon public" jest jawny z założenia: dane chronią reguły bezpieczeństwa (RLS) w bazie.
-// NIGDY nie wklejaj tu klucza "service_role".
-window.HZ_CONFIG = {
-  SUPABASE_URL: "https://TWOJ-PROJEKT.supabase.co",
-  SUPABASE_ANON_KEY: "TWOJ_ANON_KEY"
+// Wklej tu konfigurację z Firebase: Project settings → General → Your apps → Web app → "firebaseConfig".
+// Te dane są publiczne z założenia: dostęp do danych chronią reguły w pliku firestore.rules.
+window.HZ_FIREBASE = {
+  apiKey: "TWOJ_API_KEY",
+  authDomain: "TWOJ-PROJEKT.firebaseapp.com",
+  projectId: "TWOJ-PROJEKT",
+  storageBucket: "TWOJ-PROJEKT.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:0000000000000000"
 };

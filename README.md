@@ -5,63 +5,46 @@ Dziennik treningowy dla grupy trenującej na stacjach.
 - **Klient** wchodzi na stronę główną, zakłada konto (imię, e-mail, hasło, kod klubu) i od razu widzi swój panel: dzisiejsze stacje, miejsce na ciężar lub gumę, powtórzenia, RIR i zmęczenie (1–10), podpowiedź ile dołożyć, wykresy postępów i trening własny na siłowni.
 - **Trener** loguje się pod osobnym adresem `/admin.html`. Ustala ćwiczenia, kolory gum i stacje na każdy piątek, widzi wyniki całej grupy, historię każdego klienta i może pobrać CSV.
 
-Strona działa na GitHub Pages (za darmo), dane są w Supabase (darmowy plan wystarczy).
+Strona działa na GitHub Pages, a konta i dane są w **Firebase** od Google. Darmowy plan Spark wystarcza z dużym zapasem (50 000 odczytów i 20 000 zapisów dziennie) i nie wymaga karty.
 
 ---
 
 ## Jak to jest zabezpieczone
 
-- Każdy ma własne konto z hasłem (logowanie Supabase Auth).
-- Reguły w bazie (Row Level Security) pilnują, że klient czyta i zapisuje **tylko swoje** wpisy. Nawet ktoś, kto zna adres bazy, bez konta nie zobaczy nic.
-- Panel trenera działa tylko dla konta oznaczonego w bazie jako trener (`is_admin`). Zwykłe konto po zalogowaniu na `/admin.html` dostaje komunikat o braku uprawnień i nie widzi żadnych danych.
-- Konto założy tylko osoba znająca **kod klubu**. Kod zmieniasz w panelu trenera.
-- Klucz `anon` w `config.js` jest publiczny z założenia (tak działa Supabase). Nigdy nie wklejaj tam klucza `service_role`.
+- Każdy ma własne konto z hasłem (Firebase Authentication).
+- Reguły bazy (`firestore.rules`) pilnują, że klient czyta i zapisuje **tylko swoje** wpisy. Bez konta nie widać nic.
+- Panel trenera działa tylko dla konta z polem `isAdmin = true`, które ustawiasz ręcznie w konsoli Firebase. Klient nie może sam nadać sobie tej roli.
+- Konto w klubie założy tylko osoba znająca **kod klubu**. Kod zmieniasz w panelu trenera.
+- Dane w `config.js` są publiczne z założenia (tak działa Firebase w przeglądarce). Ochronę zapewniają reguły.
 
 ---
 
 ## Uruchomienie krok po kroku (ok. 15 minut)
 
-### 1. Supabase
+### 1. Projekt Firebase
 
-1. Załóż konto na [supabase.com](https://supabase.com) i kliknij **New project**. Region: najlepiej **Central EU (Frankfurt)**. Zapisz hasło do bazy w bezpiecznym miejscu.
-2. Gdy projekt się utworzy, wejdź w **SQL Editor → New query**, wklej całą zawartość pliku `supabase/schema.sql` i kliknij **Run**.
-3. Wejdź w **Project Settings → API** i skopiuj:
-   - **Project URL** (np. `https://abcd1234.supabase.co`)
-   - klucz **anon public**
-4. Otwórz plik `config.js` i podmień `TWOJ-PROJEKT` i `TWOJ_ANON_KEY` na skopiowane wartości.
+1. Wejdź na [console.firebase.google.com](https://console.firebase.google.com), zaloguj się kontem Google i kliknij **Utwórz projekt** (np. `hubzone-edziennik`). Google Analytics możesz wyłączyć.
+2. **Authentication → Rozpocznij → Sign-in method → E-mail/hasło → Włącz → Zapisz.**
+3. **Firestore Database → Utwórz bazę danych**. Lokalizacja: `eur3 (Europe)` lub `europe-central2 (Warszawa)`. Tryb: **produkcyjny**.
+4. W Firestore wejdź w zakładkę **Reguły**, usuń to, co tam jest, wklej całą zawartość pliku `firestore.rules` i kliknij **Opublikuj**.
+5. **Ustawienia projektu (koło zębate) → Ogólne → Twoje aplikacje → ikona `</>` (Web)**. Nadaj nazwę, nie zaznaczaj Hostingu, kliknij **Zarejestruj**. Skopiuj obiekt `firebaseConfig`.
+6. Otwórz `config.js` i podmień wartości na skopiowane.
 
-### 2. GitHub
+### 2. GitHub Pages
 
-1. Załóż konto na [github.com](https://github.com) i utwórz nowe repozytorium, np. `hubzone-edziennik` (może być publiczne; dane są w Supabase, nie w repo).
-2. Wgraj do niego wszystkie pliki z tego folderu (**Add file → Upload files**, przeciągnij całą zawartość, łącznie z folderami `assets` i `supabase` oraz plikiem `.nojekyll`).
-3. Wejdź w **Settings → Pages**, w **Source** wybierz **Deploy from a branch**, gałąź `main`, folder `/ (root)`, **Save**.
-4. Po minucie strona będzie pod adresem w stylu `https://TWOJA-NAZWA.github.io/hubzone-edziennik/`.
+1. W repozytorium: **Settings → Pages → Deploy from a branch**, gałąź `main`, folder `/ (root)`, **Save**.
+2. Po minucie strona działa pod adresem `https://oskarzio.github.io/hubzone-edziennik/`.
+3. W Firebase: **Authentication → Ustawienia → Autoryzowane domeny → Dodaj domenę**: `oskarzio.github.io`.
 
-### 3. Połącz Supabase ze stroną
+### 3. Twoje konto trenera
 
-W Supabase: **Authentication → URL Configuration**:
-- **Site URL**: adres strony z GitHub Pages, np. `https://TWOJA-NAZWA.github.io/hubzone-edziennik/`
-- **Redirect URLs**: dodaj ten sam adres oraz `https://TWOJA-NAZWA.github.io/hubzone-edziennik/admin.html`
+1. Wejdź na stronę główną i załóż konto (jako kod klubu wpisz cokolwiek, np. `HUBZONE`; dopóki nie ustawisz kodu, rejestracja jest otwarta).
+2. W Firebase: **Firestore Database → Dane → users →** Twój dokument → pole `isAdmin` → zmień na `true`.
+3. Wejdź na `.../admin.html`, zaloguj się i w zakładce **Ćwiczenia i ustawienia** ustaw własny kod klubu. Od tej chwili nikt bez kodu nie założy konta.
 
-Dzięki temu linki z maili (potwierdzenie konta, reset hasła) wracają na Twoją stronę.
+### 4. Klienci
 
-### 4. Twoje konto trenera
-
-1. Wejdź na stronę główną i załóż konto. Kod klubu na start to **HUBZONE**.
-2. Potwierdź e-mail (link w skrzynce).
-3. W Supabase w **SQL Editor** uruchom (z Twoim e-mailem):
-   ```sql
-   update public.profiles set is_admin = true where email = 'twoj@email.pl';
-   ```
-4. Wejdź na `.../admin.html` i zaloguj się. W zakładce **Ćwiczenia i ustawienia** od razu zmień kod klubu na własny.
-
-### 5. Klienci
-
-Wyślij grupie:
-- link do strony głównej (`https://TWOJA-NAZWA.github.io/hubzone-edziennik/`)
-- aktualny kod klubu
-
-Każdy zakłada konto raz i potem jest zalogowany na telefonie. Link `/admin.html` zostaw dla siebie (i tak bez roli trenera nic tam nie zobaczą).
+Wyślij grupie link do strony głównej i kod klubu. Każdy zakłada konto raz i potem jest zalogowany na telefonie. Link `/admin.html` zostaw dla siebie (bez roli trenera i tak nic tam nie zobaczą).
 
 ---
 
@@ -85,16 +68,16 @@ Gumy ustawiasz w kolejności od **najmocniejszej asysty do najsłabszej**; po os
 ```
 index.html          panel klienta
 admin.html          panel trenera
-config.js           adres i klucz Supabase (uzupełnij)
+config.js           dane projektu Firebase (uzupełnij)
+firestore.rules     reguły bezpieczeństwa bazy (wklej w Firebase)
 assets/style.css    wygląd
-assets/common.js    wspólny kod: logowanie, progresja, wykresy
+assets/common.js    wspólny kod: logowanie, baza, progresja, wykresy
 assets/client.js    logika panelu klienta
 assets/admin.js     logika panelu trenera
-supabase/schema.sql tabele i reguły bezpieczeństwa
 ```
 
 ## Przydatne
 
-- **Darmowy Supabase usypia projekt po tygodniu bez ruchu.** Przy cotygodniowych treningach to nie problem; jeśli zrobisz przerwę, wejdź w panel Supabase i kliknij „Restore”.
-- **Maile z Supabase** na darmowym planie mają limit kilku na godzinę. Jeśli zakłada się cała grupa naraz, możesz w **Authentication → Providers → Email** wyłączyć „Confirm email” na czas zapisów.
-- Kopia zapasowa: w panelu trenera **Wyniki → Pobierz CSV**, albo w Supabase **Table Editor → logs → Export**.
+- Reset hasła: przycisk „Nie pamiętam hasła” wysyła link od Firebase. Jeśli mail nie dochodzi, sprawdź spam.
+- Usunięcie klienta: Firebase → Authentication → Użytkownicy (konto) oraz Firestore → `users` (profil).
+- Kopia zapasowa: w panelu trenera **Wyniki → Pobierz CSV**.

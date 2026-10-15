@@ -20,6 +20,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 var(--body);
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
   padding-top:calc(12px + env(safe-area-inset-top,0px));padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
 [hidden]{display:none!important}
+a{color:var(--accent)}
 .wrap{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
 h1,h2,h3{font-family:var(--display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:.01em}
 h1{font-size:2rem;line-height:1}

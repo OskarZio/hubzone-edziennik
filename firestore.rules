@@ -1,0 +1,64 @@
+rules_version = '2';
+// Hubzone Weightlifting e-Dziennik — reguły bezpieczeństwa Firestore.
+// Wklej całość w Firebase → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function isMember() { return signedIn() && exists(me()); }
+    function isAdmin() { return signedIn() && get(me()).data.isAdmin == true; }
+    function club() { return /databases/$(database)/documents/settings/club; }
+
+    // Profil: tworzy go sam klient przy rejestracji, tylko z poprawnym kodem klubu
+    // (dopóki trener nie ustawi kodu, rejestracja jest otwarta).
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'joinCode', 'createdAt'])
+        && request.resource.data.isAdmin == false
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
+        && request.resource.data.email == request.auth.token.email
+        && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode);
+      // klient może zmienić tylko swoje imię; rolę trenera nadajesz ręcznie w konsoli Firebase
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60;
+      allow delete: if false;
+    }
+
+    // Kod klubu: tylko trener.
+    match /settings/{doc} {
+      allow read, write: if isAdmin();
+    }
+
+    // Ćwiczenia i gumy, treningi: czytają członkowie klubu, zmienia trener.
+    match /config/{doc} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+    }
+    match /workouts/{id} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+    }
+
+    // Wpisy: klient widzi i zmienia tylko swoje, trener widzi wszystkie.
+    function validLog() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['user_id', 'workout_id', 'date', 'own', 'title', 'fatigue', 'note', 'entries', 'saved_at'])
+        && d.user_id == request.auth.uid
+        && d.date is string && d.date.size() == 10
+        && d.own is bool
+        && (d.fatigue == null || (d.fatigue is int && d.fatigue >= 1 && d.fatigue <= 10))
+        && d.note is string && d.note.size() <= 1000
+        && d.title is string && d.title.size() <= 80
+        && d.entries is list && d.entries.size() <= 30;
+    }
+    match /logs/{id} {
+      allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if isMember() && validLog();
+      allow update: if isMember() && resource.data.user_id == request.auth.uid && validLog();
+      allow delete: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+    }
+  }
+}

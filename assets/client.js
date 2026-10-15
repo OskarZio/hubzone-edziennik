@@ -13,25 +13,28 @@ const saveDrafts = (() => { let t; return () => { clearTimeout(t); t = setTimeou
 async function loadAll(){
   const uid = C.session.user.id;
   try {
-    const [pr, lg] = await Promise.all([
-      HZ.sb.from("profiles").select("*").eq("id", uid).single(),
-      HZ.sb.from("logs").select("*").eq("user_id", uid).order("date"),
-      HZ.loadConfig(), HZ.loadWorkouts()
-    ]);
-    if (pr.error) throw pr.error; if (lg.error) throw lg.error;
-    C.profile = pr.data; C.logs = lg.data; C.error = null;
+    if (HZ.registering) await HZ.registering.catch(() => {});
+    if (!C.session || C.session.user.id !== uid) return;
+    const pr = await HZ.api.profile(uid); if (pr.error) throw pr.error;
+    C.profile = pr.data;
+    if (C.profile){
+      const [lg] = await Promise.all([HZ.api.logsOf(uid), HZ.loadConfig(), HZ.loadWorkouts()]);
+      if (lg.error) throw lg.error;
+      C.logs = lg.data.sort((a,b) => (a.date||"").localeCompare(b.date||""));
+    }
+    C.error = null;
   } catch(e){ console.error(e); C.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; }
   C.drafts = HZ.LS.get(draftsKey()) || {}; C.own = HZ.LS.get(ownKey());
   C.loaded = true; render();
 }
 
 function view(){
-  if (!HZ.sb) return [header(), ...HZ.setupNeeded()];
-  if (C.authMode === "recovery") return [header(), el("div", { class:"auth" }, HZ.authView({ mode:"recovery", onMode: m => { C.authMode = "login"; if (C.session){ C.loaded = false; render(); loadAll(); } else render(); } }))];
+  if (!HZ.ready) return [header(), ...HZ.setupNeeded()];
   if (!C.session) return [header(), el("div", { class:"auth" }, HZ.authView({ mode:C.authMode, allowRegister:true, onMode: m => { C.authMode = m; render(); },
     sub: C.authMode === "register" ? "Kod klubu dostaniesz od trenera na zajęciach." : C.authMode === "login" ? "Twój dziennik treningowy: serie, postępy i podpowiedzi, ile dołożyć." : null }))];
   if (!C.loaded) return [header(), el("div", { class:"empty", text:"Wczytuję Twój dziennik…" })];
   if (C.error) return [header(), el("div", { class:"empty" }, el("p", { text:C.error }), el("button", { onclick(){ C.loaded = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
+  if (!C.profile) return [header(), joinCard()];
   return [header(), HZ.tabBar([["today","Dzisiejszy trening"],["progress","Postępy"],["own","Trening własny"],["account","Konto"]], C.tab, k => { C.tab = k; render(); }), ...body()];
 }
 function header(){
@@ -111,7 +114,7 @@ async function saveWorkout(w, d, btn){
   if (!entries.length){ toast("Wpisz powtórzenia przynajmniej w jednej serii."); return; }
   btn.disabled = true;
   const row = { user_id:C.session.user.id, workout_id:w.id, date:w.date, title:w.title || "", own:false, fatigue:d.fatigue ?? null, note:(d.note || "").trim().slice(0,1000), entries, saved_at:new Date().toISOString() };
-  const { data, error } = await HZ.sb.from("logs").upsert(row, { onConflict:"user_id,workout_id" }).select().single();
+  const { data, error } = await HZ.api.saveWorkoutLog(row);
   btn.disabled = false;
   if (error){ toast(HZ.dbError(error)); return; }
   C.logs = C.logs.filter(l => l.id !== data.id).concat(data);
@@ -148,7 +151,7 @@ function ownView(){
         return ex && sets.length ? { stationId:null, exId:ex.id, exName:ex.name, type:ex.type, targetSets:it.targetSets, targetReps:it.targetReps, sets } : null; }).filter(Boolean);
       if (!entries.length){ toast("Wpisz powtórzenia przynajmniej w jednej serii."); return; }
       const btn = ev.currentTarget; btn.disabled = true;
-      const { data, error } = await HZ.sb.from("logs").insert({ user_id:C.session.user.id, workout_id:null, date:o.date || HZ.todayISO(), own:true, title:"Trening własny", fatigue:o.fatigue ?? null, note:"", entries }).select().single();
+      const { data, error } = await HZ.api.addOwnLog({ user_id:C.session.user.id, workout_id:null, date:o.date || HZ.todayISO(), own:true, title:"Trening własny", fatigue:o.fatigue ?? null, note:"", entries });
       btn.disabled = false;
       if (error){ toast(HZ.dbError(error)); return; }
       C.logs.push(data); C.own = null; HZ.LS.set(ownKey(), null); toast("Zapisano trening"); render(); }, text:"Zapisz trening własny" })));
@@ -158,30 +161,42 @@ function ownView(){
 /* ---------- account ---------- */
 function accountView(){
   const nameIn = el("input", { id:"acc-name", maxlength:"60", value:(C.profile && C.profile.name) || "" });
-  const passIn = el("input", { id:"acc-pass", type:"password", autocomplete:"new-password", minlength:"6" });
   return [el("div", { class:"card" }, el("h2", { text:"Twoje konto" }),
       el("p", { class:"small muted", text:C.session.user.email }),
       el("label", { class:"f" }, "Imię widoczne dla trenera", nameIn),
       el("button", { async onclick(){ const n = nameIn.value.trim(); if (!n){ toast("Wpisz imię."); return; }
-        const { error } = await HZ.sb.from("profiles").update({ name:n }).eq("id", C.session.user.id);
+        const { error } = await HZ.api.updateName(C.session.user.id, n);
         if (error){ toast(HZ.dbError(error)); return; } C.profile.name = n; toast("Zapisano imię"); render(); }, text:"Zapisz imię" })),
-    el("div", { class:"card" }, el("h3", { text:"Zmień hasło" }), el("label", { class:"f" }, "Nowe hasło (min. 6 znaków)", passIn),
-      el("button", { async onclick(){ if (passIn.value.length < 6){ toast("Hasło musi mieć co najmniej 6 znaków."); return; }
-        const { error } = await HZ.sb.auth.updateUser({ password:passIn.value }); if (error){ toast(HZ.authMsg(error)); return; } passIn.value = ""; toast("Hasło zmienione"); }, text:"Zmień hasło" })),
+    el("div", { class:"card" }, el("h3", { text:"Zmień hasło" }), el("p", { class:"small muted", text:"Wyślemy na Twój e-mail link do ustawienia nowego hasła." }),
+      el("button", { async onclick(ev){ ev.currentTarget.disabled = true; try { await HZ.resetPassword(C.session.user.email); toast("Wysłano link. Sprawdź skrzynkę."); } catch(e){ toast(HZ.authMsg(e)); } }, text:"Wyślij link do zmiany hasła" })),
     el("div", { class:"row" },
-      el("button", { async onclick(){ await HZ.sb.auth.signOut(); }, text:"Wyloguj się" }),
+      el("button", { async onclick(){ await HZ.api.signOut(); }, text:"Wyloguj się" }),
       C.profile && C.profile.is_admin ? el("a", { href:"admin.html", class:"small", text:"Panel trenera →" }) : null)];
 }
 
+/* ---------- account without profile (e.g. registration interrupted) ---------- */
+function joinCard(){
+  const nameIn = el("input", { id:"jn-name", maxlength:"60", placeholder:"np. Kasia" });
+  const codeIn = el("input", { id:"jn-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase" });
+  return el("div", { class:"card auth" }, el("h2", { text:"Dokończ zakładanie konta" }),
+    el("p", { class:"small muted", text:`Zalogowano jako ${C.session.user.email}. Podaj imię i kod klubu od trenera.` }),
+    el("label", { class:"f" }, "Imię", nameIn), el("label", { class:"f" }, "Kod klubu", codeIn),
+    el("button", { class:"primary", async onclick(ev){ const name = nameIn.value.trim().slice(0,60), code = codeIn.value.trim().toUpperCase();
+      if (!name || !code){ toast("Wpisz imię i kod klubu."); return; }
+      ev.currentTarget.disabled = true;
+      const { error } = await HZ.api.createProfile(C.session.user.id, { name, email:C.session.user.email, joinCode:code });
+      if (error){ toast(error.code === "permission-denied" ? "Nieprawidłowy kod klubu." : HZ.dbError(error)); render(); return; }
+      C.loaded = false; render(); loadAll(); }, text:"Gotowe" }),
+    el("button", { class:"ghost", onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }));
+}
+
 /* ---------- boot ---------- */
-if (!HZ.sb){ render(); return; }
+if (!HZ.ready){ render(); return; }
 render();
-HZ.sb.auth.onAuthStateChange((event, session) => {
-  if (event === "PASSWORD_RECOVERY"){ C.authMode = "recovery"; C.session = session; render(); return; }
+HZ.api.onAuth(session => {
   const was = C.session && C.session.user.id;
   C.session = session;
-  if (!session){ C.loaded = false; C.profile = null; C.logs = []; C.authMode = C.authMode === "recovery" ? "recovery" : "login"; render(); return; }
-  if (C.authMode === "recovery") { render(); return; }
+  if (!session){ C.loaded = false; C.profile = null; C.logs = []; C.authMode = C.authMode === "register" ? "register" : "login"; render(); return; }
   if (was !== session.user.id){ C.loaded = false; render(); setTimeout(loadAll, 0); }
 });
 })();

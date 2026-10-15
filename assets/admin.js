@@ -6,47 +6,45 @@ const app = document.getElementById("app");
 const A = { session:null, profile:null, checked:false, authMode:"login", tab:HZ.LS.get("hz-admin-tab") || "workouts",
   clients:[], stats:{}, editW:null, editC:null, confirmDel:null, res:{ wid:null, rows:null, loading:false }, clientId:null, clientLogs:null, joinCode:undefined, error:null };
 
-function render(){ const y = window.scrollY; app.replaceChildren(...view()); window.scrollTo(0, y); }
+function render(){ const y = window.scrollY; app.replaceChildren(...view().filter(Boolean)); window.scrollTo(0, y); }
 
 async function loadAll(){
   try {
-    const pr = await HZ.sb.from("profiles").select("*").eq("id", A.session.user.id).single();
-    if (pr.error) throw pr.error;
+    const pr = await HZ.api.profile(A.session.user.id);
+    if (pr.error && pr.error.code !== "permission-denied") throw pr.error;
     A.profile = pr.data; A.checked = true;
-    if (!A.profile.is_admin){ render(); return; }
+    if (!A.profile || !A.profile.is_admin){ render(); return; }
     await Promise.all([HZ.loadConfig(), HZ.loadWorkouts(), loadClients(), loadSettings()]);
     A.error = null;
   } catch(e){ console.error(e); A.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; A.checked = true; }
   render();
 }
 async function loadClients(){
-  const [pr, lg] = await Promise.all([
-    HZ.sb.from("profiles").select("id,name,email,is_admin,created_at").order("name"),
-    HZ.sb.from("logs").select("user_id,date,fatigue,own")
-  ]);
+  const [pr, lg] = await Promise.all([HZ.api.users(), HZ.api.allLogs()]);
   if (pr.error) throw pr.error; if (lg.error) throw lg.error;
-  A.clients = pr.data.filter(p => !p.is_admin);
+  A.clients = pr.data.filter(p => !p.is_admin).sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl"));
   A.stats = {};
   for (const l of lg.data){ const s = A.stats[l.user_id] || (A.stats[l.user_id] = { n:0, last:null, fsum:0, fn:0 });
     s.n++; if (!s.last || l.date > s.last) s.last = l.date; if (l.fatigue != null){ s.fsum += l.fatigue; s.fn++; } }
 }
-async function loadSettings(){ const r = await HZ.sb.from("club_settings").select("join_code").eq("id", 1).maybeSingle(); A.joinCode = r.data ? r.data.join_code : null; }
+async function loadSettings(){ const r = await HZ.api.getClub(); if (r.error) throw r.error; A.joinCode = r.data; }
 
 function view(){
-  if (!HZ.sb) return [header(), ...HZ.setupNeeded()];
-  if (A.authMode === "recovery") return [header(), el("div", { class:"auth" }, HZ.authView({ mode:"recovery", onMode: () => { A.authMode = "login"; A.checked = false; render(); if (A.session) loadAll(); } }))];
+  if (!HZ.ready) return [header(), ...HZ.setupNeeded()];
   if (!A.session) return [header(), el("div", { class:"auth" }, HZ.authView({ mode:A.authMode, allowRegister:false, onMode: m => { A.authMode = m; render(); },
     title: A.authMode === "login" ? "Panel trenera" : null, sub: A.authMode === "login" ? "Dostęp tylko dla kont z rolą trenera." : null }))];
   if (!A.checked) return [header(), el("div", { class:"empty", text:"Sprawdzam uprawnienia…" })];
   if (A.error) return [header(), el("div", { class:"empty" }, el("p", { text:A.error }), el("button", { onclick(){ A.checked = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
   if (!A.profile || !A.profile.is_admin) return [header(), el("div", { class:"card auth" }, el("h2", { text:"Brak uprawnień trenera" }),
-    el("p", { class:"muted", text:`Konto ${A.session.user.email} nie ma roli trenera. Zaloguj się kontem trenera albo nadaj tę rolę w Supabase (instrukcja w README).` }),
-    el("div", { class:"row" }, el("button", { onclick(){ HZ.sb.auth.signOut(); }, text:"Wyloguj się" }), el("a", { href:"./", class:"small", text:"Przejdź do panelu klienta" })))];
-  return [header(), HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body()];
+    el("p", { class:"muted", text:`Konto ${A.session.user.email} nie ma roli trenera. Zaloguj się kontem trenera albo nadaj tę rolę w Firebase (instrukcja w README).` }),
+    el("div", { class:"row" }, el("button", { onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }), el("a", { href:"./", class:"small", text:"Przejdź do panelu klienta" })))];
+  const warn = !A.joinCode ? el("div", { class:"notice" }, "Kod klubu nie jest ustawiony, więc konto może założyć każdy, kto zna link. ",
+    el("button", { class:"link", onclick(){ A.tab = "settings"; HZ.LS.set("hz-admin-tab", "settings"); render(); }, text:"Ustaw kod" })) : null;
+  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body()];
 }
 function header(){
   return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
-    A.session && A.profile && A.profile.is_admin ? el("div", { class:"row" }, el("a", { href:"./", class:"small", text:"Widok klienta" }), el("button", { class:"ghost", onclick(){ HZ.sb.auth.signOut(); }, text:"Wyloguj" })) : null);
+    A.session && A.profile && A.profile.is_admin ? el("div", { class:"row" }, el("a", { href:"./", class:"small", text:"Widok klienta" }), el("button", { class:"ghost", onclick(){ HZ.api.signOut(); }, text:"Wyloguj" })) : null);
 }
 function body(){
   if (!S.config.exercises.length && A.tab !== "settings") return [setupEmpty()];
@@ -63,10 +61,10 @@ function setupEmpty(){
     el("div", { class:"row", style:"justify-content:center" },
       el("button", { class:"primary", onclick(){ A.tab = "settings"; render(); }, text:"Dodaj ćwiczenia" }),
       el("button", { async onclick(ev){ ev.currentTarget.disabled = true;
-        const bands = [["Czarna","#222222"],["Fioletowa","#7048E8"],["Zielona","#2F9E44"],["Czerwona","#E03131"],["Żółta","#FAB005"]].map(([name,color],position) => ({ name, color, position }));
-        const exercises = [["Przysiad ze sztangą","kg",2.5],["Wyciskanie hantli","kg",1],["Martwy ciąg rumuński","kg",2.5],["Podciąganie","band",0],["Pompki","bw",0]].map(([name,type,inc],position) => ({ name, type, inc, position }));
-        const a = await HZ.sb.from("bands").insert(bands); const b = await HZ.sb.from("exercises").insert(exercises);
-        if (a.error || b.error){ toast(HZ.dbError(a.error || b.error)); render(); return; }
+        const bands = [["Czarna","#222222"],["Fioletowa","#7048E8"],["Zielona","#2F9E44"],["Czerwona","#E03131"],["Żółta","#FAB005"]].map(([name,color]) => ({ id:HZ.uuid(), name, color }));
+        const exercises = [["Przysiad ze sztangą","kg",2.5],["Wyciskanie hantli","kg",1],["Martwy ciąg rumuński","kg",2.5],["Podciąganie","band",0],["Pompki","bw",0]].map(([name,type,inc]) => ({ id:HZ.uuid(), name, type, inc }));
+        const { error } = await HZ.api.saveLibrary({ exercises, bands });
+        if (error){ toast(HZ.dbError(error)); render(); return; }
         await HZ.loadConfig(); toast("Wczytano przykład. Popraw go w zakładce Ćwiczenia i ustawienia."); render(); }, text:"Wczytaj przykład" })));
 }
 
@@ -97,27 +95,21 @@ function settingsView(){
   const save = el("div", { class:"row" },
     el("button", { class:"primary", async onclick(ev){ ev.currentTarget.disabled = true; const ok = await saveLibrary(c); if (ok){ A.editC = null; toast("Zapisano ćwiczenia i gumy"); } render(); }, text:"Zapisz ćwiczenia i gumy" }),
     el("button", { onclick(){ A.editC = null; render(); }, text:"Cofnij zmiany" }));
-  const codeIn = el("input", { id:"join-code", maxlength:"40", value:A.joinCode || "", placeholder:"brak kodu", style:"text-transform:uppercase" });
+  const codeIn = el("input", { id:"join-code", maxlength:"40", value:A.joinCode || "", placeholder:"np. HUBZONE2026", style:"text-transform:uppercase" });
   const codeCard = el("div", { class:"card" }, el("h2", { text:"Kod klubu" }),
     el("p", { class:"small muted", text:"Nowy klient wpisuje ten kod przy zakładaniu konta. Dzięki temu konta nie założy nikt spoza grupy. Zmień kod, jeśli wycieknie; istniejących kont to nie dotyczy." }),
     el("label", { class:"f" }, "Aktualny kod", codeIn),
     el("button", { async onclick(){ const v = codeIn.value.trim().toUpperCase();
-      if (v && v.length < 3){ toast("Kod musi mieć co najmniej 3 znaki."); return; }
-      const { error } = await HZ.sb.from("club_settings").upsert({ id:1, join_code: v || null });
-      if (error){ toast(HZ.dbError(error)); return; } A.joinCode = v || null; toast(v ? "Zapisano kod klubu" : "Kod wyłączony: każdy z linkiem może założyć konto"); render(); }, text:"Zapisz kod" }));
+      if (v.length < 3){ toast("Kod musi mieć co najmniej 3 znaki."); return; }
+      const { error } = await HZ.api.setClub(v);
+      if (error){ toast(HZ.dbError(error)); return; } A.joinCode = v; toast("Zapisano kod klubu"); render(); }, text:"Zapisz kod" }));
   return [exCard, bandCard, save, codeCard];
 }
 async function saveLibrary(c){
-  const exs = c.exercises.filter(e => e.name.trim()).map((e, position) => ({ id:e.id || HZ.uuid(), name:e.name.trim(), type:e.type, inc:e.type === "kg" ? (e.inc || 2.5) : 0, position }));
-  const bds = c.bands.filter(b => b.name.trim()).map((b, position) => ({ id:b.id || HZ.uuid(), name:b.name.trim(), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", position }));
-  const none = "00000000-0000-0000-0000-000000000000";
-  const steps = [
-    exs.length ? HZ.sb.from("exercises").upsert(exs) : null,
-    bds.length ? HZ.sb.from("bands").upsert(bds) : null,
-    HZ.sb.from("exercises").delete().not("id", "in", `(${(exs.map(e => e.id).concat(none)).join(",")})`),
-    HZ.sb.from("bands").delete().not("id", "in", `(${(bds.map(b => b.id).concat(none)).join(",")})`)
-  ];
-  for (const p of steps){ if (!p) continue; const { error } = await p; if (error){ toast(HZ.dbError(error)); return false; } }
+  const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, inc:e.type === "kg" ? (Number(e.inc) || 2.5) : 0 }));
+  const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888" }));
+  const { error } = await HZ.api.saveLibrary({ exercises, bands });
+  if (error){ toast(HZ.dbError(error)); return false; }
   await HZ.loadConfig(); return true;
 }
 
@@ -139,7 +131,7 @@ function workoutsView(){
     el("div", { class:"chips" }, (w.stations || []).map((s, i) => { const ex = HZ.exById(s.exId); return el("span", { class:"chip", text:`${i+1}. ${ex ? ex.name : "?"} ${s.sets}×${s.reps}` }); })),
     A.confirmDel === w.id
       ? el("div", { class:"row" }, el("span", { class:"small", text:"Usunąć trening? Wpisy klientów zostaną w ich historii." }),
-          el("button", { class:"danger", async onclick(){ const { error } = await HZ.sb.from("workouts").delete().eq("id", w.id); if (error){ toast(HZ.dbError(error)); return; }
+          el("button", { class:"danger", async onclick(){ const { error } = await HZ.api.deleteWorkout(w.id); if (error){ toast(HZ.dbError(error)); return; }
             S.workouts = S.workouts.filter(x => x.id !== w.id); A.confirmDel = null; toast("Usunięto"); render(); }, text:"Usuń" }),
           el("button", { onclick(){ A.confirmDel = null; render(); }, text:"Anuluj" }))
       : el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ A.confirmDel = w.id; render(); }, text:"Usuń trening" }))));
@@ -174,7 +166,7 @@ function workoutEditor(){
         const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(),
           stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, exId:s.exId, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
-        const { data, error } = await HZ.sb.from("workouts").upsert(row).select().single();
+        const { data, error } = await HZ.api.saveWorkout(row);
         if (error){ toast(HZ.dbError(error)); render(); return; }
         S.workouts = S.workouts.filter(x => x.id !== data.id).concat(data); A.editW = null; toast("Zapisano trening. Klienci już go widzą."); render(); }, text:"Zapisz trening" }),
       el("button", { onclick(){ A.editW = null; render(); }, text:"Anuluj" })));
@@ -183,7 +175,7 @@ function workoutEditor(){
 /* ---------- results ---------- */
 async function loadResults(wid){
   A.res = { wid, rows:null, loading:true }; render();
-  const { data, error } = await HZ.sb.from("logs").select("*").eq("workout_id", wid);
+  const { data, error } = await HZ.api.logsForWorkout(wid);
   if (error){ toast(HZ.dbError(error)); A.res = { wid, rows:[], loading:false }; render(); return; }
   const byUser = new Map(data.map(l => [l.user_id, l]));
   const rows = A.clients.map(c => ({ client:c, log:byUser.get(c.id) || null }));
@@ -234,7 +226,7 @@ function exportCsv(wid, rows){
 /* ---------- clients ---------- */
 async function openClient(id){
   A.tab = "clients"; HZ.LS.set("hz-admin-tab", "clients"); A.clientId = id; A.clientLogs = null; render();
-  const { data, error } = await HZ.sb.from("logs").select("*").eq("user_id", id).order("date");
+  const { data, error } = await HZ.api.logsOf(id);
   if (error){ toast(HZ.dbError(error)); A.clientLogs = []; } else A.clientLogs = data;
   render(); window.scrollTo(0, 0);
 }
@@ -257,13 +249,11 @@ function clientsView(){
 }
 
 /* ---------- boot ---------- */
-if (!HZ.sb){ render(); return; }
+if (!HZ.ready){ render(); return; }
 render();
-HZ.sb.auth.onAuthStateChange((event, session) => {
+HZ.api.onAuth(session => {
   const was = A.session && A.session.user.id;
   A.session = session;
-  if (event === "PASSWORD_RECOVERY"){ A.authMode = "recovery"; render(); return; }
-  if (A.authMode === "recovery" && session){ render(); return; }
   if (!session){ A.checked = false; A.profile = null; render(); return; }
   if (was !== session.user.id){ A.checked = false; render(); setTimeout(loadAll, 0); }
 });
