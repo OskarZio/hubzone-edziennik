@@ -272,7 +272,7 @@ function resultsView(){
         el("span", { style:"font-weight:600", text:`${e.exName} · cel ${e.targetSets}×${e.targetReps}` }),
         el("span", { class:"num", style:"font-size:1.05rem", text:HZ.setsText(e) }))))
       : el("span", { class:"muted small", text:"Brak wpisu z tego treningu." }),
-    log && log.note ? el("p", { class:"small", text:"Notatka: " + log.note }) : null)));
+    log && log.note ? el("p", { class:"small", text:"Notatka / feedback: " + log.note }) : null)));
   return out;
 }
 function exportCsv(wid, rows){
@@ -331,7 +331,7 @@ function entryView(){
   }
   out.push(el("div", { class:"card" }, el("h3", { text:"Zmęczenie po treningu" }),
     HZ.fatiguePicker(d.fatigue, v => { d.fatigue = v; render(); }),
-    el("label", { class:"f" }, "Notatka (opcjonalnie)", el("textarea", { id:"en-note", maxlength:"1000", value:d.note, oninput(e){ d.note = e.target.value; } })),
+    el("label", { class:"f" }, "Notatka / feedback (opcjonalnie)", el("textarea", { id:"en-note", maxlength:"1000", value:d.note, oninput(e){ d.note = e.target.value; } })),
     el("div", { class:"row" },
       el("button", { class:"primary", onclick(ev){ saveEntry(ev.currentTarget); }, text:"Zapisz wyniki" }),
       el("button", { onclick(){ A.entry = null; render(); }, text:"Anuluj" }))));

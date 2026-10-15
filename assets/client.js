@@ -137,7 +137,7 @@ function todayView(){
   out.push(el("div", { class:"card" },
     el("div", { class:"stack", style:"gap:2px" }, el("h3", { text:"Zmęczenie po treningu" }), el("span", { class:"small muted", text:"1 = lekko, 10 = nie dam rady nic więcej" })),
     HZ.fatiguePicker(d.fatigue, v => { d.fatigue = v; saveDrafts(); render(); }),
-    el("label", { class:"f" }, "Notatka dla trenera (opcjonalnie)", el("textarea", { id:"note-" + w.id, maxlength:"1000", value:d.note, oninput(e){ d.note = e.target.value; saveDrafts(); } })),
+    el("label", { class:"f" }, "Notatka do trenera / feedback (opcjonalnie)", el("textarea", { id:"note-" + w.id, maxlength:"1000", value:d.note, oninput(e){ d.note = e.target.value; saveDrafts(); } })),
     el("button", { class:"primary", onclick(e){ saveWorkout(w, d, e.currentTarget); }, text: saved ? "Zapisz zmiany" : "Wyślij wyniki do trenera" })));
   return out;
 }
