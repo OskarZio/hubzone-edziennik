@@ -182,7 +182,8 @@ HZ.warmupLoads = (ex, n, next) => {
     const k = HZ.bandIdx(w1); return [w1, ...ramp(n - 1, Math.min(k + 1, Math.max(k, top)))];
   }
   if (ex.type !== "kg") return Array(n).fill(null);
-  if (ex.warmKgScap){ const rest = HZ.warmupLoads({ ...ex, warmKgScap:false, warmStart:null }, n, next); rest[0] = HZ.SCAP; return rest; }
+  /* W1 without load: the trainer's text shows in the weight column */
+  if (ex.warmKgScap || (ex.warmLabel && !(Number(ex.warmStart) > 0))){ const rest = HZ.warmupLoads({ ...ex, warmKgScap:false, warmStart:null, warmLabel:"" }, n, next); rest[0] = HZ.SCAP; return rest; }
   const step = HZ.incRange(ex)[0], start = Number(ex.warmStart) > 0 ? Number(ex.warmStart) : null;
   const r = v => Math.max(0, Math.round(v / step) * step);
   if (next == null) return Array.from({ length:n }, (_, i) => i === 0 && start ? start : null);
