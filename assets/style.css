@@ -33,6 +33,7 @@ p{margin:0}
 .num{font-family:var(--display);font-variant-numeric:tabular-nums}
 .brand{display:flex;align-items:center;gap:10px}
 .brand .mark{width:38px;height:38px;border-radius:8px;background:var(--ink);color:var(--bg);display:grid;place-items:center;font-family:var(--display);font-weight:700;font-size:1.15rem;letter-spacing:.02em;flex:none}
+.brand img.logo{width:44px;height:44px;border-radius:50%;background:#fff;padding:0;object-fit:cover;box-shadow:0 0 0 1px var(--line)}
 .brand .bt{display:flex;flex-direction:column;line-height:1.05}
 .brand .bt b{font-family:var(--display);font-size:1.05rem;letter-spacing:.06em;text-transform:uppercase}
 .brand .bt span{font-family:var(--display);font-size:.95rem;color:var(--accent);font-weight:600}

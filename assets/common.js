@@ -111,7 +111,7 @@ HZ.swap = (app, nodes) => {
   app.replaceChildren(...nodes.filter(Boolean)); window.scrollTo(0, y);
   if (id){ const n = document.getElementById(id); if (n && n !== a){ n.focus({ preventScroll:true }); if (sel && typeof n.setSelectionRange === "function") try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
 };
-HZ.brand = (sub) => el("div", { class:"brand" }, el("span", { class:"mark", "aria-hidden":"true", text:"HZ" }),
+HZ.brand = (sub) => el("div", { class:"brand" }, el("img", { class:"mark logo", src:"assets/icons/icon-192.png", alt:"", width:"44", height:"44" }),
   el("span", { class:"bt" }, el("b", { text:"Hubzone Weightlifting" }), el("span", { text: sub || "e-Dziennik" })));
 
 /* ---------- shared state ---------- */
