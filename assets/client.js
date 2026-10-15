@@ -52,6 +52,15 @@ function header(){
         n ? el("span", { class:"small muted", text:`Masz już ${n} ${HZ.plural(n, "zapisany trening", "zapisane treningi", "zapisanych treningów")}` }) : null)));
   return out;
 }
+function updateState(){
+  const wid = currentId(); const w = S.workouts.find(x => x.id === wid); const d = w && C.drafts[w.id]; if (!d) return;
+  for (const st of (w.stations || [])){ const n = document.querySelector(`[data-state="${st.id}"]`); if (!n) continue;
+    const stt = stationState(w, st, d); n.textContent = stt.text; n.className = "state " + stt.kind;
+    const b = n.nextElementSibling; if (b) b.className = stt.kind === "ok" ? "" : "primary"; }
+}
+window.addEventListener("pagehide", () => { try { if (C.session) HZ.LS.set(draftsKey(), C.drafts); } catch(e){} });
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && C.session) HZ.LS.set(draftsKey(), C.drafts); });
+
 /* ---------- ranking ---------- */
 async function syncRanking(){
   if (!S.config.rankingEnabled || !C.profile || !C.session) return;
@@ -156,14 +165,43 @@ function stationCard(w, st, exBase, label, d, isSuper){
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
     HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),
-    HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); }, { repsHint:sg.reps, noWarmup:!isMain }));
+    HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); else updateState(); }, { repsHint:sg.reps, noWarmup:!isMain }),
+    (() => { const stt = stationState(w, st, d); const name = label.split(" · ")[0];
+      return el("div", { class:"stsave" }, el("span", { class:"state " + stt.kind, "data-state":st.id, text:stt.text }),
+        el("button", { class: stt.kind === "ok" ? "" : "primary", onclick(ev){ saveProgress(w, d, ev.currentTarget, name); }, text: `Zapisz ${isMain ? "bój" : "stację"}` })); })());
 }
 function cleanSets(sets){ return sets.filter(s => s.reps != null).map(s => ({ load: s.load === "" ? null : s.load ?? null, reps:s.reps, rir: s.warmup ? null : (s.rir ?? null), ...(s.warmup ? { warmup:true } : {}) })); }
-async function saveWorkout(w, d, btn){
+/* entries of the whole workout from the draft (stations with at least one set filled in) */
+function buildEntries(w, d){
   const entries = [];
   for (const st of (w.stations || [])){ const ex = HZ.exById(st.exId); if (!ex) continue;
     const sets = cleanSets(d.st[st.id] || []);
     if (sets.length) entries.push({ stationId:st.id, exId:ex.id, exName:ex.name, type:(d.mode && d.mode[st.id]) || ex.type, ...(HZ.targetRir(w, st) != null ? { targetRir:HZ.targetRir(w, st) } : {}), targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.reps || 0, sets }); }
+  return entries;
+}
+function stationState(w, st, d){
+  const saved = C.logs.find(l => l.workout_id === w.id);
+  const se = saved && (saved.entries || []).find(e => e.stationId === st.id);
+  const now = cleanSets(d.st[st.id] || []);
+  if (!now.length && !se) return { kind:"none", text:"Nic jeszcze nie wpisano" };
+  if (se && JSON.stringify(se.sets) === JSON.stringify(now)) return { kind:"ok", text:"✓ Zapisane" + (saved.saved_at ? ` (${new Date(saved.saved_at).toLocaleTimeString("pl-PL", { hour:"2-digit", minute:"2-digit" })})` : "") };
+  return { kind:"dirty", text:"Niezapisane zmiany" };
+}
+/* save progress after each lift/station: keeps the draft, trainer already sees it */
+async function saveProgress(w, d, btn, label){
+  const entries = buildEntries(w, d);
+  if (!entries.length){ toast("Wpisz powtórzenia przynajmniej w jednej serii."); return; }
+  btn.disabled = true;
+  const prev = C.logs.find(l => l.workout_id === w.id);
+  const row = { user_id:C.session.user.id, workout_id:w.id, date:w.date, title:w.title || "", own:false, fatigue: d.fatigue ?? (prev ? prev.fatigue ?? null : null), note:(d.note || "").trim().slice(0,1000), entries, saved_at:new Date().toISOString() };
+  const { data, error } = await HZ.api.saveWorkoutLog(row);
+  btn.disabled = false;
+  if (error){ toast(HZ.dbError(error)); return; }
+  C.logs = C.logs.filter(l => l.id !== data.id).concat(data); syncRanking(); HZ.LS.set(draftsKey(), C.drafts);
+  toast(`Zapisano: ${label}`); render();
+}
+async function saveWorkout(w, d, btn){
+  const entries = buildEntries(w, d);
   if (!entries.length){ toast("Wpisz powtórzenia przynajmniej w jednej serii."); return; }
   btn.disabled = true;
   const row = { user_id:C.session.user.id, workout_id:w.id, date:w.date, title:w.title || "", own:false, fatigue:d.fatigue ?? null, note:(d.note || "").trim().slice(0,1000), entries, saved_at:new Date().toISOString() };

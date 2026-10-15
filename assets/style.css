@@ -86,7 +86,7 @@ button.pick[aria-pressed="true"]{background:var(--good);border-color:var(--good)
 .badge.rir{background:var(--hold);color:var(--surface)}
 /* sets table: one roomy row per set, warm-ups tinted, aligned columns */
 .sets{display:flex;flex-direction:column;gap:8px;margin-top:2px}
-.set{display:grid;grid-template-columns:2.4rem minmax(0,1.7fr) minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:center}
+.set{display:grid;grid-template-columns:2.4rem minmax(0,1.6fr) minmax(0,1fr);gap:8px;align-items:center}
 .set:not(.head){min-height:52px;padding:6px 8px 6px 4px;border-radius:10px;background:var(--sunk)}
 .set .n{font-family:var(--display);font-size:1.3rem;font-weight:700;color:var(--ink);text-align:center}
 .set.head{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;padding:0 8px 0 4px}
@@ -97,11 +97,20 @@ button.pick[aria-pressed="true"]{background:var(--good);border-color:var(--good)
 .set.warm input,.set.warm select{border-style:dashed}
 .scap{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;min-height:44px;text-align:center;font-family:var(--display);font-weight:600;font-size:.98rem;line-height:1.1;color:var(--hold);background:var(--hold-soft);border-radius:8px;padding:4px 6px;overflow-wrap:anywhere}
 .wlabel{font-size:.62rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600;text-align:center;line-height:1.2}
+.rirpick{grid-column:2/-1;display:flex;align-items:center;gap:4px}
+.rirpick .rl{font-size:.66rem;font-weight:600;letter-spacing:.08em;color:var(--muted);margin-right:2px}
+.rirpick button{flex:1;min-width:0;height:34px;padding:0;border-radius:8px;font-family:var(--display);font-size:1rem;font-weight:600;background:var(--surface);border:1px solid var(--line);color:var(--ink)}
+.rirpick button[aria-pressed="true"]{background:var(--hold);border-color:var(--hold);color:var(--surface)}
+.wnote{grid-column:2/-1;font-size:.8rem;color:var(--hold);font-weight:600}
+.stsave{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px}
+.stsave .state{font-size:.82rem;color:var(--muted)}
+.stsave .state.ok{color:var(--good);font-weight:600}
+.stsave .state.dirty{color:var(--accent);font-weight:600}
 .sets > .row{gap:6px;padding-top:2px}
 .sets > .row button.ghost{border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:.85rem;color:var(--ink)}
 @media (max-width:420px){
   .card{padding:12px}
-  .set{grid-template-columns:2rem minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr);gap:6px}
+  .set{grid-template-columns:2rem minmax(0,1.6fr) minmax(0,1fr);gap:6px}
   .set input,.set select{font-size:1.05rem}
 }
 .chips{display:flex;flex-wrap:wrap;gap:6px}

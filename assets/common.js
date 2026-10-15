@@ -280,10 +280,19 @@ HZ.loadInput = (ex, val, onVal, id) => {
   return el("input", { id, inputmode:"decimal", placeholder: ex.type === "bw" ? "+kg" : "kg", "aria-label": ex.type === "bw" ? "Dodatkowe obciążenie" : "Ciężar w kg",
     value: val == null ? "" : HZ.fmtKg(val), onchange(e){ onVal(HZ.parseNum(e.target.value)); } });
 };
+/* RIR as a row of tap targets 0–5 (tap again to clear) */
+HZ.rirPicker = (val, onVal, id) => {
+  const wrap = el("div", { class:"rirpick", role:"group", "aria-label":"Zapas powtórzeń (RIR)", id });
+  wrap.append(el("span", { class:"rl", text:"RIR" }));
+  [0,1,2,3,4,5].forEach(n => wrap.append(el("button", { type:"button", "aria-pressed":String(val === n), title: n === 0 ? "0 = do upadku" : `${n} powt. zapasu`,
+    onclick(ev){ const on = ev.currentTarget.getAttribute("aria-pressed") === "true"; wrap.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", "false"));
+      if (!on) ev.currentTarget.setAttribute("aria-pressed", "true"); onVal(on ? null : n); }, text: n === 5 ? "5+" : String(n) })));
+  return wrap;
+};
 HZ.rirSelect = (val, onVal, id) => el("select", { id, "aria-label":"Zapas powtórzeń (RIR)", value: val == null ? "" : String(val), onchange(e){ onVal(e.target.value === "" ? null : Number(e.target.value)); } },
   el("option", { value:"", text:"–" }), [0,1,2,3,4,5].map(n => el("option", { value:String(n), text: n === 5 ? "5+" : String(n) })));
 HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
-  const head = el("div", { class:"set head" }, el("span", { text:"#" }), el("span", { text: ex.type === "band" ? "Guma" : ex.type === "bw" ? "Dociąż." : "Ciężar" }), el("span", { text:"Powt." }), el("span", { text:"RIR" }));
+  const head = el("div", { class:"set head" }, el("span", { text:"#" }), el("span", { text: ex.type === "band" ? "Guma" : ex.type === "bw" ? "Dociąż." : "Ciężar" }), el("span", { text:"Powt." }));
   let wn = 0, rn = 0;
   const warmIdx = i => sets.slice(0, i).filter(x => x.warmup).length;
   const rows = sets.map((s, i) => {
@@ -297,7 +306,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
           setTimeout(() => onChange(true), 0); }, `${keyPrefix}-l${i}`)),
       el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type, ex) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
-      s.warmup ? el("span", { class:"wlabel", text: warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? ex.warmLabel : "wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
+      s.warmup ? (warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? el("span", { class:"wnote", text:ex.warmLabel }) : null) : HZ.rirPicker(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
