@@ -40,7 +40,7 @@ function view(){
     el("div", { class:"row" }, el("button", { onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }), el("a", { href:"./", class:"small", text:"Przejdź do panelu klienta" })))];
   const warn = !A.joinCode ? el("div", { class:"notice" }, "Kod klubu nie jest ustawiony, więc konto może założyć każdy, kto zna link. ",
     el("button", { class:"link", onclick(){ A.tab = "settings"; HZ.LS.set("hz-admin-tab", "settings"); render(); }, text:"Ustaw kod" })) : null;
-  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body()];
+  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body()];
 }
 function header(){
   return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
@@ -51,6 +51,12 @@ function body(){
   if (A.tab === "settings") return settingsView();
   if (A.tab === "results") return resultsView();
   if (A.tab === "clients") return clientsView();
+  if (A.tab === "ranking"){
+    if (!A.rankRows){ HZ.api.ranking().then(r => { A.rankRows = r.data || []; if (r.error) toast(HZ.dbError(r.error)); render(); }); return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
+    return [...HZ.rankingView(A.rankRows, null, render, { showHidden:true }),
+      el("div", { class:"row" }, el("button", { onclick(){ A.rankRows = null; render(); }, text:"Odśwież" }),
+        el("span", { class:"small muted", text: S.config.rankingEnabled ? "Klienci widzą ranking. Osoby ukryte widzisz tylko Ty." : "Ranking jest wyłączony dla klientów (Ćwiczenia i ustawienia)." }))];
+  }
   return workoutsView();
 }
 
@@ -62,7 +68,7 @@ function setupEmpty(){
       el("button", { class:"primary", onclick(){ A.tab = "settings"; render(); }, text:"Dodaj ćwiczenia" }),
       el("button", { async onclick(ev){ ev.currentTarget.disabled = true;
         const bands = [["Czarna","#222222"],["Fioletowa","#7048E8"],["Zielona","#2F9E44"],["Czerwona","#E03131"],["Żółta","#FAB005"]].map(([name,color]) => ({ id:HZ.uuid(), name, color }));
-        const exercises = [["Przysiad ze sztangą","kg",2.5],["Wyciskanie hantli","kg",1],["Martwy ciąg rumuński","kg",2.5],["Podciąganie","band",0],["Pompki","bw",0]].map(([name,type,inc]) => ({ id:HZ.uuid(), name, type, inc }));
+        const exercises = [["Przysiad ze sztangą","kg",1.25,2.5],["Wyciskanie hantli","kg",1,2],["Martwy ciąg rumuński","kg",1.25,2.5],["Podciąganie","band",1.25,2.5],["Pompki","bw",1.25,2.5]].map(([name,type,incMin,incMax]) => ({ id:HZ.uuid(), name, type, incMin, incMax }));
         const { error } = await HZ.api.saveLibrary({ exercises, bands });
         if (error){ toast(HZ.dbError(error)); render(); return; }
         await HZ.loadConfig(); toast("Wczytano przykład. Popraw go w zakładce Ćwiczenia i ustawienia."); render(); }, text:"Wczytaj przykład" })));
@@ -73,16 +79,19 @@ function settingsView(){
   if (!A.editC) A.editC = HZ.clone(S.config);
   const c = A.editC;
   const exCard = el("div", { class:"card" }, el("h2", { text:"Ćwiczenia" }),
-    el("p", { class:"small muted", text:"Typ decyduje o podpowiedzi: ciężar dokłada kilogramy, guma zmienia ją na słabszą, masa ciała dokłada powtórzenia." }),
+    el("p", { class:"small muted", text:"Klient sam wybiera na stacji: ciężar, guma albo masa ciała. Tu ustawiasz sposób domyślny i zakres skoku ciężaru (np. 1,25–2,5 kg), z którego klient wybiera przy progresji." }),
     el("div", { class:"list" }, c.exercises.map((e, i) => el("div", { class:"stack" },
       el("div", { class:"row", style:"flex-wrap:nowrap" },
         el("input", { id:`ex-n-${e.id || i}`, maxlength:"80", value:e.name, "aria-label":"Nazwa ćwiczenia", placeholder:"Nazwa ćwiczenia", oninput(ev){ e.name = ev.target.value; } }),
         el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.exercises[i-1], c.exercises[i]] = [c.exercises[i], c.exercises[i-1]]; render(); }, text:"↑" }),
         el("button", { class:"ghost", "aria-label":"Usuń ćwiczenie", onclick(){ c.exercises.splice(i, 1); render(); }, text:"✕" })),
       el("div", { class:"grid2" },
-        el("label", { class:"f" }, "Typ", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).map(([k,v]) => el("option", { value:k, text:v })))),
-        e.type === "kg" ? el("label", { class:"f" }, "Skok ciężaru", el("select", { id:`ex-i-${e.id || i}`, value:String(e.inc || 2.5), onchange(ev){ e.inc = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) + " kg" })))) : el("span"))))),
-    el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", inc:2.5 }); render(); }, text:"+ Dodaj ćwiczenie" }));
+        el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).map(([k,v]) => el("option", { value:k, text:v })))),
+        el("label", { class:"f" }, "Skok ciężaru (kg)", el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" },
+          el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),
+          el("span", { text:"–" }),
+          el("select", { id:`ex-hi-${e.id || i}`, "aria-label":"Skok do", value:String(HZ.incRange(e)[1]), onchange(ev){ e.incMax = Number(ev.target.value); } }, [0.5,1,1.25,2,2.5,5].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))))))))),
+    el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", incMin:1.25, incMax:2.5 }); render(); }, text:"+ Dodaj ćwiczenie" }));
   const bandCard = el("div", { class:"card" }, el("h2", { text:"Gumy" }),
     el("p", { class:"small muted", text:"Ułóż od najmocniejszej (największa asysta) do najsłabszej. Podpowiedź przesuwa klienta w dół listy." }),
     el("div", { class:"list" }, c.bands.map((b, i) => el("div", { class:"row", style:"flex-wrap:nowrap" },
@@ -103,10 +112,28 @@ function settingsView(){
       if (v.length < 3){ toast("Kod musi mieć co najmniej 3 znaki."); return; }
       const { error } = await HZ.api.setClub(v);
       if (error){ toast(HZ.dbError(error)); return; } A.joinCode = v; toast("Zapisano kod klubu"); render(); }, text:"Zapisz kod" }));
-  return [exCard, bandCard, save, codeCard];
+  const ownCard = el("div", { class:"card" }, el("h2", { text:"Trening własny" }),
+    el("p", { class:"small muted", text:"Zakładka, w której klienci zapisują treningi zrobione poza zajęciami. Te wyniki liczą się do ich postępów i podpowiedzi." }),
+    el("label", { class:"row", style:"flex-wrap:nowrap;cursor:pointer" },
+      el("input", { id:"own-enabled", type:"checkbox", style:"width:auto", checked: S.config.ownEnabled || null, async onchange(ev){
+        const on = ev.target.checked; ev.target.disabled = true;
+        const { error } = await HZ.api.setOwnEnabled(on);
+        if (error){ toast(HZ.dbError(error)); ev.target.checked = !on; ev.target.disabled = false; return; }
+        S.config.ownEnabled = on; if (A.editC) A.editC.ownEnabled = on; toast(on ? "Trening własny włączony dla klientów" : "Trening własny wyłączony"); render(); } }),
+      el("span", { text:"Pokaż klientom zakładkę „Trening własny”" })));
+  const rankCard = el("div", { class:"card" }, el("h2", { text:"Ranking" }),
+    el("p", { class:"small muted", text:"Tabela grupy: punkty za obecność i rekordy, seria piątków z rzędu, progres i tonaż. Każdy klient może się ukryć w ustawieniach konta." }),
+    el("label", { class:"row", style:"flex-wrap:nowrap;cursor:pointer" },
+      el("input", { id:"rank-enabled", type:"checkbox", style:"width:auto", checked: S.config.rankingEnabled || null, async onchange(ev){
+        const on = ev.target.checked; ev.target.disabled = true;
+        const { error } = await HZ.api.setRankingEnabled(on);
+        if (error){ toast(HZ.dbError(error)); ev.target.checked = !on; ev.target.disabled = false; return; }
+        S.config.rankingEnabled = on; toast(on ? "Ranking włączony" : "Ranking wyłączony"); render(); } }),
+      el("span", { text:"Pokaż klientom ranking i tabelę ogólną" })));
+  return [exCard, bandCard, save, codeCard, ownCard, rankCard];
 }
 async function saveLibrary(c){
-  const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, inc:e.type === "kg" ? (Number(e.inc) || 2.5) : 0 }));
+  const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1] }));
   const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888" }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
   if (error){ toast(HZ.dbError(error)); return false; }
@@ -128,7 +155,7 @@ function workoutsView(){
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date, true)}` }), el("h3", { text:w.title || "Trening stacyjny" })),
       el("div", { class:"row" }, el("button", { onclick(){ A.editW = HZ.clone(w); render(); }, text:"Edytuj" }),
         el("button", { onclick(){ A.tab = "results"; A.res = { wid:w.id, rows:null, loading:false }; HZ.LS.set("hz-admin-tab", "results"); render(); }, text:"Wyniki" }))),
-    el("div", { class:"chips" }, (w.stations || []).map((s, i) => { const ex = HZ.exById(s.exId); return el("span", { class:"chip", text:`${i+1}. ${ex ? ex.name : "?"} ${s.sets}×${s.reps}` }); })),
+    el("div", { class:"chips" }, (w.stations || []).map((s, i) => { const ex = HZ.exById(s.exId); return el("span", { class:"chip", text:`${i+1}. ${ex ? ex.name : "?"} ${s.warmup ? s.warmup + "W + " : ""}${s.sets}×${s.reps}` }); })),
     A.confirmDel === w.id
       ? el("div", { class:"row" }, el("span", { class:"small", text:"Usunąć trening? Wpisy klientów zostaną w ich historii." }),
           el("button", { class:"danger", async onclick(){ const { error } = await HZ.api.deleteWorkout(w.id); if (error){ toast(HZ.dbError(error)); return; }
@@ -153,8 +180,9 @@ function workoutEditor(){
         el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [w.stations[i-1], w.stations[i]] = [w.stations[i], w.stations[i-1]]; render(); }, text:"↑" }),
         el("button", { class:"ghost", "aria-label":"W dół", disabled:i === w.stations.length - 1, onclick(){ [w.stations[i+1], w.stations[i]] = [w.stations[i], w.stations[i+1]]; render(); }, text:"↓" }),
         el("button", { class:"ghost", "aria-label":"Usuń stację", onclick(){ w.stations.splice(i, 1); render(); }, text:"✕" })),
-      el("div", { class:"grid4" },
-        el("label", { class:"f" }, "Serie", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
+      el("div", { class:"grid3" },
+        el("label", { class:"f" }, "Serie wstępne", el("input", { id:`st-wu-${s.id}`, inputmode:"numeric", placeholder:"0", value: s.warmup ? String(s.warmup) : "", oninput(e){ s.warmup = Math.min(6, Math.max(0, Math.round(HZ.parseNum(e.target.value) || 0))); } })),
+        el("label", { class:"f" }, "Serie robocze", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
         el("label", { class:"f" }, "Powtórzenia", el("input", { id:`st-r-${s.id}`, inputmode:"numeric", value:String(s.reps || ""), oninput(e){ s.reps = Math.round(HZ.parseNum(e.target.value) || 0); } })),
         el("label", { class:"f" }, "Czas na stacji", el("input", { id:`st-w-${s.id}`, maxlength:"30", value:s.work || "", placeholder:"np. 8 min", oninput(e){ s.work = e.target.value; } })),
         el("label", { class:"f" }, "Przerwa", el("input", { id:`st-p-${s.id}`, maxlength:"30", value:s.rest || "", placeholder:"np. 90 s", oninput(e){ s.rest = e.target.value; } }))),
@@ -164,7 +192,7 @@ function workoutEditor(){
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jedną stację."); return; }
         const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(),
-          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, exId:s.exId, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
+          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, exId:s.exId, warmup:s.warmup || 0, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
         if (error){ toast(HZ.dbError(error)); render(); return; }
@@ -214,10 +242,10 @@ function resultsView(){
 }
 function exportCsv(wid, rows){
   const w = S.workouts.find(x => x.id === wid);
-  const lines = [["data","trening","klient","cwiczenie","cel","seria","obciazenie","powtorzenia","RIR","zmeczenie"].join(";")];
-  for (const { client, log } of rows) for (const e of (log.entries || [])) e.sets.forEach((s, i) => lines.push([log.date, "#" + HZ.workoutNo(wid), client.name, e.exName, `${e.targetSets}x${e.targetReps}`, i+1,
+  const lines = [["data","trening","klient","cwiczenie","cel","typ","seria","obciazenie","powtorzenia","RIR","zmeczenie"].join(";")];
+  for (const { client, log } of rows) for (const e of (log.entries || [])){ let wi = 0, ri = 0; e.sets.forEach(s => lines.push([log.date, "#" + HZ.workoutNo(wid), client.name, e.exName, `${e.targetSets}x${e.targetReps}`, s.warmup ? "wstepna" : "robocza", s.warmup ? ++wi : ++ri,
     e.type === "band" ? HZ.bandName(s.load) : (s.load == null ? "" : String(s.load).replace(".", ",")), s.reps, s.rir ?? "", log.fatigue ?? ""]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(";")));
+    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(";"))); }
   const blob = new Blob(["﻿" + lines.join("\n")], { type:"text/csv;charset=utf-8" });
   const a = el("a", { href:URL.createObjectURL(blob), download:`hubzone-wyniki-${w ? w.date : "trening"}.csv` });
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);

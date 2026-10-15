@@ -26,7 +26,7 @@ Strona działa na GitHub Pages, a konta i dane są w **Firebase** od Google. Dar
 1. Wejdź na [console.firebase.google.com](https://console.firebase.google.com), zaloguj się kontem Google i kliknij **Utwórz projekt** (np. `hubzone-edziennik`). Google Analytics możesz wyłączyć.
 2. **Authentication → Rozpocznij → Sign-in method → E-mail/hasło → Włącz → Zapisz.**
 3. **Firestore Database → Utwórz bazę danych**. Lokalizacja: `eur3 (Europe)` lub `europe-central2 (Warszawa)`. Tryb: **produkcyjny**.
-4. W Firestore wejdź w zakładkę **Reguły**, usuń to, co tam jest, wklej całą zawartość pliku `firestore.rules` i kliknij **Opublikuj**.
+4. W Firestore wejdź w zakładkę **Rules** (Reguły), usuń to, co tam jest, wklej całą zawartość pliku `firestore.rules` i kliknij **Opublikuj**.
 5. **Ustawienia projektu (koło zębate) → Ogólne → Twoje aplikacje → ikona `</>` (Web)**. Nadaj nazwę, nie zaznaczaj Hostingu, kliknij **Zarejestruj**. Skopiuj obiekt `firebaseConfig`.
 6. Otwórz `config.js` i podmień wartości na skopiowane.
 
@@ -50,18 +50,31 @@ Wyślij grupie link do strony głównej i kod klubu. Każdy zakłada konto raz i
 
 ## Jak działa podpowiedź progresji
 
-Na podstawie ostatniego zapisu danego ćwiczenia:
+Klient na każdej stacji wybiera sposób wykonania: **ciężar**, **guma** albo **masa ciała**. Domyślny ustawia trener. Podpowiedź i wykres liczą się osobno dla każdego sposobu.
 
-| Ostatni wynik | Podpowiedź |
-|---|---|
-| Wszystkie serie zrobione, najniższy RIR ≥ 2 | Dołóż skok ciężaru (ustawiasz 0,5–5 kg na ćwiczenie) / słabsza guma / +1 powtórzenie |
-| Wszystkie serie zrobione, RIR ≥ 4 | Podwójny skok / guma o dwie słabsza / +2 powtórzenia |
-| Wszystkie serie zrobione, RIR 0–1 | Zostań przy tym obciążeniu |
-| Zabrakło powtórzeń | Zostań i domknij serie |
-| Zabrakło powtórzeń 2× z rzędu na tym samym ciężarze | Zmniejsz o skok / mocniejsza guma |
-| Zmęczenie 9–10 przy podpowiedzi „dołóż” | Dopisek, żeby dołożyć tylko przy lepszym samopoczuciu |
+**Serie wstępne** (rozgrzewkowe) trener ustawia na stacji. Przy ciężarze aplikacja proponuje ok. 50% i 80% ciężaru roboczego. Nie liczą się do progresji, rekordów ani tonażu.
 
-Gumy ustawiasz w kolejności od **najmocniejszej asysty do najsłabszej**; po ostatniej jest „bez gumy”.
+Podpowiedź patrzy na ostatni zapis danego ćwiczenia (serie robocze):
+
+| Ostatni wynik | Ciężar | Guma |
+|---|---|---|
+| Wszystkie powtórzenia, RIR 0–1 (lub brak RIR) | Dołóż z zakresu (np. 1,25–2,5 kg), polecane dolne; cel **3–4 powt.** | Słabsza guma; cel 3–4 powt. |
+| Wszystkie powtórzenia, RIR 2–3 | Polecana górna granica; cel **4–5 powt.** | Słabsza guma; cel 4–5 powt. |
+| Wszystkie powtórzenia, RIR 4+ | Górna granica; pełne powtórzenia | Słabsza guma |
+| Zabrakło powtórzeń | Zostań i domknij serie | Zostań |
+| Zabrakło 2× z rzędu na tym samym obciążeniu | Zmniejsz o górną granicę | Mocniejsza guma |
+
+Klient wybiera skok przyciskiem (np. „+1,25 → 41,25 kg” albo „+2,5 → 42,5 kg”), a sugerowana liczba powtórzeń pojawia się w polach serii. Zakres skoku ustawiasz osobno dla każdego ćwiczenia. Gumy układasz od najmocniejszej do najsłabszej.
+
+## Ranking i tabela ogólna
+
+- **Punkty**: 10 za każdy trening z grupą + 5 za każdy rekord.
+- **Seria**: ile ostatnich piątków z rzędu klient był obecny.
+- **Rekordy**: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i trybie.
+- **Progres**: średni procentowy wzrost największego ciężaru od pierwszego treningu.
+- **Tonaż**: suma ciężar × powtórzenia w seriach roboczych.
+
+Klient może się ukryć w zakładce **Konto**. Trener widzi wszystkich i może wyłączyć ranking w **Ćwiczenia i ustawienia**. Tam też włącza zakładkę **Trening własny** (domyślnie wyłączona).
 
 ## Struktura plików
 
@@ -81,3 +94,5 @@ assets/admin.js     logika panelu trenera
 - Reset hasła: przycisk „Nie pamiętam hasła” wysyła link od Firebase. Jeśli mail nie dochodzi, sprawdź spam.
 - Usunięcie klienta: Firebase → Authentication → Użytkownicy (konto) oraz Firestore → `users` (profil).
 - Kopia zapasowa: w panelu trenera **Wyniki → Pobierz CSV**.
+
+> **Po każdej aktualizacji pliku `firestore.rules`** wklej go ponownie w Firebase → Firestore → Rules → Publish.

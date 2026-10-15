@@ -64,6 +64,9 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:.78rem;color:var(--
 .sets{display:flex;flex-direction:column;gap:6px}
 .set{display:grid;grid-template-columns:2.2rem minmax(0,1.6fr) minmax(0,1fr) minmax(0,1fr);gap:6px;align-items:center}
 .set .n{font-family:var(--display);font-size:1.25rem;font-weight:700;color:var(--muted);text-align:center}
+.set.warm input,.set.warm select{background:var(--surface);border-style:dashed}
+.set.warm .n{font-size:1rem;color:var(--hold)}
+.wlabel{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--hold);font-weight:600;text-align:center}
 .set.head{font-size:.7rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600}
 .set input,.set select{text-align:center;font-family:var(--display);font-size:1.15rem;font-weight:600;padding:8px 4px}
 .tip{border-radius:8px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start;font-size:.92rem}
@@ -74,6 +77,11 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:.78rem;color:var(--
 .tip.down{background:var(--bad-soft)} .tip.down .ic,.tip.down b{color:var(--bad)}
 .tip.first{background:var(--sunk);border:1px dashed var(--line)} .tip.first .ic{color:var(--muted)}
 .swatch{width:14px;height:14px;border-radius:50%;border:1px solid var(--line);display:inline-block;flex:none}
+.modes{display:flex;gap:4px;background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:3px}
+.modes button{flex:1;border:0;background:none;color:var(--muted);padding:7px 6px;font-size:.88rem;border-radius:6px}
+.modes button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+button.pick{padding:6px 10px;font-size:.85rem;border-radius:999px;background:var(--surface)}
+button.pick[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--surface)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:.82rem;background:var(--sunk)}
 .fatigue{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:4px}
@@ -94,5 +102,15 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:.78rem;color:var(--
 table{border-collapse:collapse;width:100%;font-size:.88rem;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 th{font-size:.72rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}
+.podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:end}
+.pod{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 6px;border-radius:8px;background:var(--sunk);text-align:center;min-width:0}
+.pod b{font-family:var(--display);font-size:1.15rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pod .pl{font-family:var(--display);font-weight:700;font-size:1.6rem;line-height:1}
+.pod .pv{font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.pod.p1{background:var(--accent-soft);padding-block:16px}.pod.p1 .pl{color:var(--accent)}
+.pod.me{outline:2px solid var(--accent)}
+table.rank td.on,table.rank th.on{font-weight:700;color:var(--ink)}
+table.rank tr.me td{background:var(--accent-soft)}
+.modes{overflow-x:auto}.modes button{white-space:nowrap}
 .auth{max-width:420px;width:100%;margin:6vh auto 0}
 @media (prefers-reduced-motion:no-preference){.toast{animation:pop .2s ease-out}@keyframes pop{from{opacity:0;transform:translate(-50%,8px)}}}
