@@ -385,7 +385,7 @@ function clientsView(){
     el("div", { class:"row", style:"flex-wrap:nowrap" }, nameIn,
       el("button", { class:"primary", style:"white-space:nowrap", async onclick(ev){ const n = nameIn.value.trim().slice(0, 60); if (!n){ toast("Wpisz imię."); return; }
         ev.currentTarget.disabled = true; const { data, error } = await HZ.api.addManualClient(n);
-        if (error){ toast(HZ.dbError(error)); render(); return; }
+        if (error){ toast(error.code === "permission-denied" ? "Firebase odrzucił zapis: wklej aktualny plik firestore.rules w Firestore → Rules i kliknij Publish." : HZ.dbError(error)); render(); return; }
         A.clients.push(data); A.clients.sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl")); toast(`Dodano: ${n}`); render(); }, text:"Dodaj" })));
   if (!A.clients.length) return [addCard, el("div", { class:"empty" }, el("h3", { text:"Brak klientów" }), el("p", { class:"small", text:"Klienci pojawią się tu po założeniu konta na stronie głównej z kodem klubu albo gdy dodasz ich powyżej." }))];
   return [addCard, el("div", { class:"card" },
