@@ -82,8 +82,19 @@ HZ.SECTIONS = [
 ];
 HZ.secOf = st => st.section === "main" ? "main" : "acc";
 HZ.orderStations = stations => [...stations.filter(s => HZ.secOf(s) === "main"), ...stations.filter(s => HZ.secOf(s) !== "main")];
-HZ.stationLabels = stations => { const n = { main:0, acc:0 }, out = {};
-  for (const st of stations){ const k = HZ.secOf(st); n[k]++; out[st.id] = (k === "main" ? "Bój " : "Stacja ") + n[k]; } return out; };
+/* labels: main lifts "Bój 1…"; accessories get letters, supersets share a letter: A1, A2, then B, C1, C2… */
+HZ.stationLabels = stations => {
+  const out = {}; let n = 0;
+  stations.filter(s => HZ.secOf(s) === "main").forEach(s => { out[s.id] = "Bój " + (++n); });
+  const acc = stations.filter(s => HZ.secOf(s) !== "main"); const groups = [];
+  acc.forEach((s, i) => { if (i > 0 && s.superset) groups[groups.length - 1].push(s); else groups.push([s]); });
+  groups.forEach((g, gi) => { const L = String.fromCharCode(65 + (gi % 26));
+    g.forEach((s, k) => { out[s.id] = g.length > 1 ? L + (k + 1) : L; }); });
+  return out;
+};
+HZ.supersetInfo = stations => { const lb = HZ.stationLabels(stations), out = {};
+  for (const s of stations){ const l = lb[s.id]; if (/^[A-Z]\d$/.test(l)) out[s.id] = stations.filter(x => lb[x.id] && lb[x.id][0] === l[0] && /^[A-Z]\d$/.test(lb[x.id]) && x.id !== s.id).map(x => lb[x.id]); }
+  return out; };
 HZ.TYPE_LABEL = { kg:"ciężar (kg)", band:"guma (asysta)", bw:"masa ciała" };
 HZ.plural = (n, one, few, many) => n === 1 ? one : (n%10 >= 2 && n%10 <= 4 && (n%100 < 10 || n%100 >= 20)) ? few : many;
 

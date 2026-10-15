@@ -45,6 +45,7 @@ header.top{display:flex;justify-content:space-between;align-items:center;gap:12p
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0}
 .station{border-left:5px solid var(--hold)}
 .station.main{border-left-color:var(--accent)}
+.station.super{border-left-style:double;border-left-width:7px}
 .sechead{display:flex;align-items:baseline;gap:10px;padding-top:6px;border-bottom:2px solid var(--ink);padding-bottom:4px}
 .sec-edit{padding-top:6px}
 .chip.main{border-color:var(--accent);color:var(--accent)}

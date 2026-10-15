@@ -159,7 +159,7 @@ function workoutsView(){
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date, true)}` }), el("h3", { text:w.title || "Trening stacyjny" })),
       el("div", { class:"row" }, el("button", { onclick(){ A.editW = HZ.clone(w); render(); }, text:"Edytuj" }),
         el("button", { onclick(){ A.tab = "results"; A.res = { wid:w.id, rows:null, loading:false }; HZ.LS.set("hz-admin-tab", "results"); render(); }, text:"Wyniki" }))),
-    el("div", { class:"chips" }, HZ.orderStations(w.stations || []).map(s => { const ex = HZ.exById(s.exId); const lb = HZ.stationLabels(HZ.orderStations(w.stations || []))[s.id]; return el("span", { class:"chip" + (HZ.secOf(s) === "main" ? " main" : ""), text:`${lb}: ${ex ? ex.name : "?"} ${s.warmup ? s.warmup + "W + " : ""}${s.sets}×${s.reps}` }); })),
+    el("div", { class:"chips" }, HZ.orderStations(w.stations || []).map(s => { const ex = HZ.exById(s.exId); const lb = HZ.stationLabels(HZ.orderStations(w.stations || []))[s.id]; return el("span", { class:"chip" + (HZ.secOf(s) === "main" ? " main" : ""), text:`${lb}. ${ex ? ex.name : "?"} ${s.warmup ? s.warmup + "W + " : ""}${s.sets}×${s.reps}` }); })),
     A.confirmDel === w.id
       ? el("div", { class:"row" }, el("span", { class:"small", text:"Usunąć trening? Wpisy klientów zostaną w ich historii." }),
           el("button", { class:"danger", async onclick(){ const { error } = await HZ.api.deleteWorkout(w.id); if (error){ toast(HZ.dbError(error)); return; }
@@ -184,7 +184,7 @@ function workoutEditor(){
         el("div", { class:"list" }, items.map((s, j) => { const gi = w.stations.indexOf(s);
           const swap = other => { const go = w.stations.indexOf(other); [w.stations[gi], w.stations[go]] = [w.stations[go], w.stations[gi]]; render(); };
           return el("div", { class:"stack" },
-          el("div", { class:"row", style:"flex-wrap:nowrap" }, el("span", { class:"num", style:"font-size:1.4rem;font-weight:700;width:1.6rem;flex:none", text:j+1 }),
+          el("div", { class:"row", style:"flex-wrap:nowrap" }, el("span", { class:"num", style:"font-size:1.3rem;font-weight:700;min-width:1.8rem;flex:none", text: sec.key === "main" ? j+1 : HZ.stationLabels(HZ.orderStations(w.stations))[s.id] }),
             el("select", { id:`st-ex-${s.id}`, "aria-label":"Ćwiczenie", value:s.exId || "", onchange(e){ s.exId = e.target.value; } }, S.config.exercises.map(e => el("option", { value:e.id, text:e.name }))),
             el("button", { class:"ghost", "aria-label":"W górę", disabled:j === 0, onclick(){ swap(items[j-1]); }, text:"↑" }),
             el("button", { class:"ghost", "aria-label":"W dół", disabled:j === items.length - 1, onclick(){ swap(items[j+1]); }, text:"↓" }),
@@ -197,13 +197,16 @@ function workoutEditor(){
             el("label", { class:"f" }, "Przerwa", el("input", { id:`st-p-${s.id}`, maxlength:"30", value:s.rest || "", placeholder: sec.key === "main" ? "np. 3 min" : "np. 90 s", oninput(e){ s.rest = e.target.value; } }))),
           el("div", { class:"row", style:"flex-wrap:nowrap" },
             el("input", { id:`st-n-${s.id}`, maxlength:"200", value:s.note || "", placeholder:"Uwaga techniczna (opcjonalnie)", "aria-label":"Uwaga", oninput(e){ s.note = e.target.value; } }),
-            el("button", { class:"ghost small", style:"white-space:nowrap", onclick(){ s.section = sec.key === "main" ? "acc" : "main"; render(); }, text: sec.key === "main" ? "→ akcesoria" : "→ trening główny" }))); })),
+            el("button", { class:"ghost small", style:"white-space:nowrap", onclick(){ s.section = sec.key === "main" ? "acc" : "main"; render(); }, text: sec.key === "main" ? "→ akcesoria" : "→ trening główny" })),
+          sec.key !== "main" && j > 0 ? el("label", { class:"row small", style:"flex-wrap:nowrap;cursor:pointer;gap:6px" },
+            el("input", { id:`st-ss-${s.id}`, type:"checkbox", style:"width:auto", checked: s.superset || null, onchange(e){ s.superset = e.target.checked; render(); } }),
+            el("span", { text:"Superseria z poprzednim ćwiczeniem (A1, A2…)" })) : null); })),
         el("button", { onclick(){ w.stations.push(newStation(sec.key)); render(); }, text:sec.add })); }),
     el("div", { class:"row" },
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jeden bój albo stację."); return; }
         const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(),
-          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
+          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
         if (error){ toast(HZ.dbError(error)); render(); return; }

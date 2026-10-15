@@ -107,11 +107,12 @@ function todayView(){
     el("div", { style:"max-width:240px;flex:1 1 170px" }, pick))];
   if (w.note) out.push(el("p", { class:"muted", text:w.note }));
   const labels = HZ.stationLabels(HZ.orderStations(w.stations || []));
+  const ss = HZ.supersetInfo(HZ.orderStations(w.stations || []));
   for (const sec of HZ.SECTIONS){
     const items = (w.stations || []).filter(st => HZ.secOf(st) === sec.key && HZ.exById(st.exId));
     if (!items.length) continue;
     out.push(el("div", { class:"sechead" }, el("h2", { text:sec.title }), el("span", { class:"eyebrow", text:sec.sub })));
-    items.forEach(st => out.push(stationCard(w, st, HZ.exById(st.exId), labels[st.id], d)));
+    items.forEach(st => out.push(stationCard(w, st, HZ.exById(st.exId), labels[st.id] + (ss[st.id] ? ` · superseria z ${ss[st.id].join(", ")}` : ""), d, !!ss[st.id])));
   }
   out.push(el("div", { class:"card" },
     el("div", { class:"stack", style:"gap:2px" }, el("h3", { text:"Zmęczenie po treningu" }), el("span", { class:"small muted", text:"1 = lekko, 10 = nie dam rady nic więcej" })),
@@ -125,7 +126,7 @@ function freshSets(w, st, ex, mode){
   const sg = HZ.suggest(C.logs, ex.id, mode, ex, w.id);
   return HZ.buildSets(mx, HZ.secOf(st) === "main" ? (st.warmup || 0) : 0, st.sets || 3, sg.next ?? null);
 }
-function stationCard(w, st, exBase, label, d){
+function stationCard(w, st, exBase, label, d, isSuper){
   d.mode = d.mode || {};
   const mode = d.mode[st.id] || exBase.type; const ex = { ...exBase, type:mode };
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
@@ -134,7 +135,7 @@ function stationCard(w, st, exBase, label, d){
   const isMain = HZ.secOf(st) === "main";
   if (!isMain && sets.some(x => x.warmup)){ const keep = sets.filter(x => !x.warmup); sets.length = 0; sets.push(...keep); }
   const extra = [isMain && st.warmup ? `+ ${st.warmup} ${HZ.plural(st.warmup, "seria wstępna", "serie wstępne", "serii wstępnych")}` : null, st.work ? `praca ${st.work}` : null, st.rest ? `przerwa ${st.rest}` : null, st.note].filter(Boolean);
-  return el("section", { class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") },
+  return el("section", { class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") + (isSuper ? " super" : "") },
     el("div", { class:"row between", style:"align-items:flex-start" },
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", { text:ex.name })),
       el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` })),
