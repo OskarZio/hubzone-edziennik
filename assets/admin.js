@@ -176,6 +176,9 @@ function workoutEditor(){
     el("div", { class:"grid2" },
       el("label", { class:"f" }, "Data", el("input", { id:"we-date", type:"date", value:w.date, onchange(e){ w.date = e.target.value; } })),
       el("label", { class:"f" }, "Nazwa (opcjonalnie)", el("input", { id:"we-title", maxlength:"80", value:w.title || "", placeholder:"np. Siła – dół", oninput(e){ w.title = e.target.value; } }))),
+    el("label", { class:"f" }, "Docelowy RIR na ten trening",
+      el("select", { id:"we-rir", value: w.rir != null ? String(w.rir) : "", onchange(e){ w.rir = e.target.value === "" ? null : Number(e.target.value); render(); } },
+        el("option", { value:"", text:"bez celu (podpowiedź wg ostatniego RIR)" }), [0,1,2,3,4].map(n => el("option", { value:String(n), text:`RIR ${n}` + (n === 0 ? " (do upadku)" : "") })))),
     el("label", { class:"f" }, "Wskazówki dla grupy", el("textarea", { id:"we-note", maxlength:"1000", value:w.note || "", placeholder:"np. Rotacja co 8 min, każdy zaczyna od innej stacji", oninput(e){ w.note = e.target.value; } })),
     HZ.SECTIONS.map(sec => { const items = w.stations.filter(s => HZ.secOf(s) === sec.key);
       return el("section", { class:"stack sec-edit" },
@@ -193,6 +196,8 @@ function workoutEditor(){
             sec.key !== "main" ? null : el("label", { class:"f" }, "Serie wstępne", el("input", { id:`st-wu-${s.id}`, inputmode:"numeric", placeholder:"0", value: s.warmup ? String(s.warmup) : "", oninput(e){ s.warmup = Math.min(6, Math.max(0, Math.round(HZ.parseNum(e.target.value) || 0))); } })),
             el("label", { class:"f" }, "Serie robocze", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
             el("label", { class:"f" }, "Powtórzenia", el("input", { id:`st-r-${s.id}`, inputmode:"numeric", value:String(s.reps || ""), oninput(e){ s.reps = Math.round(HZ.parseNum(e.target.value) || 0); } })),
+            el("label", { class:"f" }, "RIR", el("select", { id:`st-rir-${s.id}`, value: s.rir != null ? String(s.rir) : "", onchange(e){ s.rir = e.target.value === "" ? null : Number(e.target.value); } },
+              el("option", { value:"", text: w.rir != null ? `jak trening (${w.rir})` : "–" }), [0,1,2,3,4].map(n => el("option", { value:String(n), text:String(n) })))),
             el("label", { class:"f" }, sec.key === "main" ? "Czas" : "Czas na stacji", el("input", { id:`st-w-${s.id}`, maxlength:"30", value:s.work || "", placeholder:"np. 8 min", oninput(e){ s.work = e.target.value; } })),
             el("label", { class:"f" }, "Przerwa", el("input", { id:`st-p-${s.id}`, maxlength:"30", value:s.rest || "", placeholder: sec.key === "main" ? "np. 3 min" : "np. 90 s", oninput(e){ s.rest = e.target.value; } }))),
           el("div", { class:"row", style:"flex-wrap:nowrap" },
@@ -205,8 +210,8 @@ function workoutEditor(){
     el("div", { class:"row" },
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jeden bój albo stację."); return; }
-        const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(),
-          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
+        const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(), rir: w.rir ?? null,
+          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, rir: s.rir ?? null, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
         if (error){ toast(HZ.dbError(error)); render(); return; }

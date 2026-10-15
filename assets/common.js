@@ -81,6 +81,7 @@ HZ.SECTIONS = [
   { key:"acc", title:"Akcesoria", sub:"stacje", item:"Stacja", add:"+ Dodaj stację" }
 ];
 HZ.secOf = st => st.section === "main" ? "main" : "acc";
+HZ.targetRir = (w, st) => { const v = st && st.rir != null && st.rir !== "" ? st.rir : (w && w.rir != null && w.rir !== "" ? w.rir : null); return v == null ? null : Number(v); };
 HZ.orderStations = stations => [...stations.filter(s => HZ.secOf(s) === "main"), ...stations.filter(s => HZ.secOf(s) !== "main")];
 /* labels: main lifts "Bój 1…"; accessories get letters, supersets share a letter: A1, A2, then B, C1, C2… */
 HZ.stationLabels = stations => {
@@ -171,10 +172,12 @@ HZ.incRange = ex => {
   if (lo > hi) [lo, hi] = [hi, lo]; return [lo, hi];
 };
 const repRange = (a, b) => { a = Math.max(1, a); b = Math.max(1, b); return a === b ? String(a) : `${a}–${b}`; };
-HZ.suggest = (logs, exId, type, ex, excludeWorkoutId) => {
+/* targetRir: trainer's planned RIR for today (optional). Lower than last time's reserve → heavier, higher → hold or lighter. */
+HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
   const { fmtKg, fmtDate, bandName, bandIdx, fmtLoad } = HZ;
   const h = HZ.history(logs, exId, excludeWorkoutId, type);
-  if (!h.length) return { kind:"first", title:"Pierwszy raz w tym trybie", text:"Dobierz obciążenie, przy którym na końcu serii zostają ci 2–3 powtórzenia zapasu (RIR 2–3).", next:null };
+  const goal = targetRir != null ? ` Cel na dziś: RIR ${targetRir}.` : "";
+  if (!h.length) return { kind:"first", title:"Pierwszy raz w tym trybie", text: targetRir != null ? `Dobierz obciążenie tak, żeby na końcu serii zostało ${targetRir} powt. zapasu (RIR ${targetRir}).` : "Dobierz obciążenie, przy którym na końcu serii zostają ci 2–3 powtórzenia zapasu (RIR 2–3).", next:null };
   const { log, entry } = h[0]; const load = HZ.workLoad(entry); const { hit, minRir } = HZ.judge(entry);
   const setTxt = entry.sets.map(s => type === "kg" ? `${fmtKg(s.load)}×${s.reps ?? "–"}` : type === "band" ? `${bandName(s.load)}×${s.reps ?? "–"}` : `${s.reps ?? "–"}`).join(" · ");
   const last = `Ostatnio (${fmtDate(log.date)}): ${setTxt}` + (minRir != null ? `, najniższy RIR ${minRir}` : "");
@@ -183,14 +186,26 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId) => {
   const bands = S.config.bands;
   if (hit){
     const T = entry.targetReps || 5;
-    const small = minRir == null || minRir <= 1;           // RIR 0–1 (or not given): small jump, expect 3–4 reps
+    let small = minRir == null || minRir <= 1;             // RIR 0–1 (or not given): small jump, expect 3–4 reps
+    if (targetRir != null && minRir != null){
+      const room = minRir - targetRir;                     // reserve left last time vs. reserve planned today
+      if (room <= -2){
+        const why2 = `${last}.${goal} Ostatnio zostawało tylko ${minRir}, więc dziś zejdź z ciężaru.`;
+        if (type === "kg"){ const nx = Math.max(0, (load || 0) - lo); return { kind:"down", title:`Lżej: −${fmtKg(lo)} kg → ${fmtKg(nx)} kg`, text:why2, next:nx, base:load || 0 }; }
+        if (type === "band"){ const i = load === "none" ? bands.length : bandIdx(load); const nx = i > 0 ? bands[i-1].id : load;
+          return { kind:"down", title: nx === load ? "Zostań przy tej gumie" : `Mocniejsza guma → ${HZ.bandFull(nx)}`, text:why2, next:nx }; }
+        return { kind:"down", title:"Zrób o 1–2 powt. mniej", text:why2, next:load, reps:repRange(T - 2, T - 1) };
+      }
+      if (room === -1) return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:`${last}.${goal} Ostatnio zapas był mniejszy, więc dziś nie dokładaj.`, next:load, base: type === "kg" ? (load || 0) : null };
+      small = room === 0;                                   // exactly as planned → small jump; more reserve → bigger
+    }
     const reps = small ? repRange(T - 2, T - 1) : minRir >= 4 ? String(T) : repRange(T - 1, T);   // RIR 2–3: top of range, 4–5 reps
     const why = minRir == null ? "nie wpisano RIR" : small ? `RIR ${minRir}, mały zapas` : `RIR ${minRir}, jest zapas`;
     if (type === "kg"){
       const base = load || 0, rec = small ? lo : hi;
       const options = (lo === hi ? [lo] : [lo, hi]).map(a => ({ load: base + a, label:`+${fmtKg(a)} → ${fmtKg(base + a)} kg`, rec: a === rec }));
       return { kind:"up", title: lo === hi ? `Dołóż ${fmtKg(lo)} kg` : `Dołóż ${fmtKg(lo)}–${fmtKg(hi)} kg`,
-        text:`${last}. Polecam +${fmtKg(rec)} kg (${minRir == null ? "nie wpisano RIR" : small ? "mały zapas" : "był zapas"}). Po przeskoku celuj w ${reps} powt. w serii.` + tiredNote, next: base + rec, options, reps, base };
+        text:`${last}. Polecam +${fmtKg(rec)} kg (${minRir == null ? "nie wpisano RIR" : small ? "mały zapas" : "był zapas"}). Po przeskoku celuj w ${reps} powt. w serii.` + goal + tiredNote, next: base + rec, options, reps, base };
     }
     if (type === "band"){
       const i = bandIdx(load);
@@ -198,20 +213,20 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId) => {
       const nx = i + 1 >= bands.length ? "none" : bands[i + 1].id;
       const options = [{ load:nx, label: nx === "none" ? "Bez gumy" : `Słabsza: ${HZ.bandFull(nx)}`, rec:true }, { load, label:`Zostań: ${HZ.bandFull(load)}`, rec:false }];
       return { kind:"up", title: nx === "none" ? "Spróbuj bez gumy" : `Zmniejsz gumę → ${HZ.bandFull(nx)}`,
-        text:`${last}. Po zmianie gumy celuj w ${reps} powt. w serii.` + tiredNote, next:nx, options, reps };
+        text:`${last}. Po zmianie gumy celuj w ${reps} powt. w serii.` + goal + tiredNote, next:nx, options, reps };
     }
-    if (small) return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:last + ". Serie wyszły, ale blisko upadku. Powtórz i celuj w RIR 2.", next:load };
+    if (small) return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:last + ". Serie wyszły, ale blisko upadku. Powtórz" + (goal || " i celuj w RIR 2."), next:load };
     const add = minRir >= 4 ? 2 : 1;
-    return { kind:"up", title:`Dołóż ${add} powt. w serii`, text:last + `. Cel: ${T + add} powtórzeń.` + tiredNote, next:load, reps:String(T + add) };
+    return { kind:"up", title:`Dołóż ${add} powt. w serii`, text:last + `. Cel: ${T + add} powtórzeń.` + goal + tiredNote, next:load, reps:String(T + add) };
   }
   const prev = h[1];
   const missedTwice = prev && JSON.stringify(HZ.workLoad(prev.entry)) === JSON.stringify(load) && !HZ.judge(prev.entry).hit;
   if (missedTwice){
-    if (type === "kg"){ const nx = Math.max(0, (load||0) - hi); return { kind:"down", title:`Zmniejsz o ${fmtKg(hi)} kg → ${fmtKg(nx)} kg`, text:last + ". Drugi raz z rzędu zabrakło powtórzeń.", next:nx }; }
+    if (type === "kg"){ const nx = Math.max(0, (load||0) - hi); return { kind:"down", title:`Zmniejsz o ${fmtKg(hi)} kg → ${fmtKg(nx)} kg`, text:last + ". Drugi raz z rzędu zabrakło powtórzeń." + goal, next:nx, base:load || 0 }; }
     if (type === "band"){ const i = load === "none" ? bands.length : bandIdx(load); const nx = i > 0 ? bands[i-1].id : load;
       return { kind:"down", title: nx === load ? "Zostań przy tej gumie" : `Mocniejsza guma → ${HZ.bandFull(nx)}`, text:last + ". Drugi raz z rzędu zabrakło powtórzeń.", next:nx }; }
   }
-  return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:last + `. Zabrakło powtórzeń do celu ${entry.targetSets || ""}×${entry.targetReps || ""}. Spróbuj domknąć wszystkie serie.`, next:load };
+  return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:last + `. Zabrakło powtórzeń do celu ${entry.targetSets || ""}×${entry.targetReps || ""}. Spróbuj domknąć wszystkie serie.` + goal, next:load, base: type === "kg" ? (load || 0) : null };
 };
 
 /* ---------- UI pieces ---------- */
@@ -259,7 +274,7 @@ HZ.tipBox = (sg, onPick, current) => el("div", { class:"tip " + sg.kind }, el("s
     onPick && sg.base != null ? customJump(sg, onPick, current) : null));
 /* participant's own jump, e.g. +0,5 or +5 kg */
 function customJump(sg, onPick, current){
-  const isCustom = typeof current === "number" && !(sg.options || []).some(o => o.load === current);
+  const isCustom = typeof current === "number" && current !== sg.next && current !== sg.base && !(sg.options || []).some(o => o.load === current);
   const inp = el("input", { type:"text", inputmode:"decimal", "aria-label":"Własny skok w kg", placeholder:"np. 0,5",
     value: isCustom && current > sg.base ? HZ.fmtKg(Math.round((current - sg.base) * 100) / 100) : "", style:"width:5rem;text-align:center;padding:6px 8px" });
   const go = () => { const v = HZ.parseNum(inp.value); if (v == null || v < 0 || v > 50){ HZ.toast("Wpisz skok od 0 do 50 kg, np. 0,5."); return; } onPick(Math.round((sg.base + v) * 100) / 100); };

@@ -123,14 +123,15 @@ function todayView(){
 }
 function freshSets(w, st, ex, mode){
   const mx = { ...ex, type:mode };
-  const sg = HZ.suggest(C.logs, ex.id, mode, ex, w.id);
+  const sg = HZ.suggest(C.logs, ex.id, mode, ex, w.id, HZ.targetRir(w, st));
   return HZ.buildSets(mx, HZ.secOf(st) === "main" ? (st.warmup || 0) : 0, st.sets || 3, sg.next ?? null);
 }
 function stationCard(w, st, exBase, label, d, isSuper){
   d.mode = d.mode || {};
   const mode = d.mode[st.id] || exBase.type; const ex = { ...exBase, type:mode };
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
-  const sg = HZ.suggest(C.logs, ex.id, mode, exBase, w.id);
+  const tRir = HZ.targetRir(w, st);
+  const sg = HZ.suggest(C.logs, ex.id, mode, exBase, w.id, tRir);
   const curLoad = (sets.find(s => !s.warmup) || {}).load;
   const isMain = HZ.secOf(st) === "main";
   if (!isMain && sets.some(x => x.warmup)){ const keep = sets.filter(x => !x.warmup); sets.length = 0; sets.push(...keep); }
@@ -138,7 +139,8 @@ function stationCard(w, st, exBase, label, d, isSuper){
   return el("section", { class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") + (isSuper ? " super" : "") },
     el("div", { class:"row between", style:"align-items:flex-start" },
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", { text:ex.name })),
-      el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` })),
+      el("div", { class:"row", style:"gap:4px;justify-content:flex-end" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }),
+        tRir != null ? el("span", { class:"badge rir", title:"Docelowy zapas powtórzeń", text:`RIR ${tRir}` }) : null)),
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
     HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),
@@ -149,7 +151,7 @@ async function saveWorkout(w, d, btn){
   const entries = [];
   for (const st of (w.stations || [])){ const ex = HZ.exById(st.exId); if (!ex) continue;
     const sets = cleanSets(d.st[st.id] || []);
-    if (sets.length) entries.push({ stationId:st.id, exId:ex.id, exName:ex.name, type:(d.mode && d.mode[st.id]) || ex.type, targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.reps || 0, sets }); }
+    if (sets.length) entries.push({ stationId:st.id, exId:ex.id, exName:ex.name, type:(d.mode && d.mode[st.id]) || ex.type, ...(HZ.targetRir(w, st) != null ? { targetRir:HZ.targetRir(w, st) } : {}), targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.reps || 0, sets }); }
   if (!entries.length){ toast("Wpisz powtórzenia przynajmniej w jednej serii."); return; }
   btn.disabled = true;
   const row = { user_id:C.session.user.id, workout_id:w.id, date:w.date, title:w.title || "", own:false, fatigue:d.fatigue ?? null, note:(d.note || "").trim().slice(0,1000), entries, saved_at:new Date().toISOString() };

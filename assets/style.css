@@ -88,6 +88,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:.78rem;color:var(--
 .modes button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
 button.pick{padding:6px 10px;font-size:.85rem;border-radius:999px;background:var(--surface)}
 button.pick[aria-pressed="true"]{background:var(--good);border-color:var(--good);color:var(--surface)}
+.badge.rir{background:var(--hold);color:var(--surface)}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:.82rem;background:var(--sunk)}
 .fatigue{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:4px}
