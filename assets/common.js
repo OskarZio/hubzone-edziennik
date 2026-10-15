@@ -523,8 +523,8 @@ const RANK_COLS = [
 ];
 const BOARDS = [
   { key:"points", label:"Ogólny", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
-  { key:"strength", label:"Siłowy", desc:`Za postęp: ${HZ.POINTS.pr} pkt za każdy rekord osobisty + średni progres największego ciężaru w %. Każdy porównywany jest sam ze sobą.` },
-  { key:"rel", label:"% masy ciała", desc:"Siła względna: największy ciężar roboczy w wybranym ćwiczeniu jako % masy ciała. Przy podciąganiu i dipach liczy się masa ciała + dociążenie. Masa ciała nie jest nikomu pokazywana." }
+  { key:"rel", label:"Siła", desc:"Siła względna: największy ciężar roboczy jako % masy ciała, więc 100 kg przy 100 kg wagi to 100%, a 80 kg przy 60 kg to 133%. Domyślnie średnia z bojów głównych. Przy podciąganiu i dipach liczy się masa ciała + dociążenie. Samej masy ciała nikt nie widzi." },
+  { key:"strength", label:"Postęp", desc:`Za postęp: ${HZ.POINTS.pr} pkt za każdy rekord osobisty + średni progres największego ciężaru w %. Każdy porównywany jest sam ze sobą.` }
 ];
 let rankSort = "points", relEx = null;
 HZ.rankingView = (rows, meId, rerender, opts = {}) => {
@@ -533,10 +533,14 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   // exercises available for relative strength
   const relIds = [...new Set(vis.flatMap(r => Object.keys(r.rel || {})))].filter(id => HZ.exById(id))
     .sort((a,b) => vis.filter(r => r.rel && r.rel[b] != null).length - vis.filter(r => r.rel && r.rel[a] != null).length);
-  if (!relIds.includes(relEx)) relEx = relIds[0] || null;
-  const relCol = ["rel", "% MC", r => r.rel && r.rel[relEx] != null ? r.rel[relEx] + "%" : "–"];
+  // main lifts = exercises the trainer puts in the "Trening główny" section
+  const mainIds = new Set(S.workouts.flatMap(w => (w.stations || []).filter(st => HZ.secOf(st) === "main").map(st => st.exId)));
+  const relAvg = r => { const v = Object.entries(r.rel || {}).filter(([id]) => mainIds.has(id)).map(([, p]) => p); return v.length ? Math.round(v.reduce((a,b) => a + b, 0) / v.length) : null; };
+  if (relEx !== "main" && !relIds.includes(relEx)) relEx = mainIds.size ? "main" : (relIds[0] || null);
+  const relOf = r => relEx === "main" ? relAvg(r) : (r.rel && r.rel[relEx] != null ? r.rel[relEx] : null);
+  const relCol = ["rel", "% MC", r => relOf(r) != null ? relOf(r) + "%" : "–"];
   const cols = rankSort === "rel" ? [relCol, ...RANK_COLS] : RANK_COLS;
-  const val = r => rankSort === "rel" ? (r.rel && r.rel[relEx] != null ? r.rel[relEx] : -Infinity) : (r[rankSort] == null ? -Infinity : r[rankSort]);
+  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : (r[rankSort] == null ? -Infinity : r[rankSort]);
   const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((b.points||0) - (a.points||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
   const placed = sorted.map((r, i) => { if (val(r) !== prev){ place = i + 1; prev = val(r); } return { r, place: val(r) === -Infinity ? "–" : place }; });
@@ -548,13 +552,14 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
     : el("p", { class:"small muted", text: rankSort === "rel" ? "Nikt jeszcze nie ma wyniku w tym ćwiczeniu z wpisaną masą ciała." : "Brak wyników." });
   const me = placed.find(x => x.r.id === meId);
   const exSel = rankSort === "rel" && relIds.length ? el("select", { id:"rel-ex", "aria-label":"Ćwiczenie", onchange(e){ relEx = e.target.value; rerender(); } },
-    relIds.map(id => el("option", { value:id, text:HZ.exById(id).name }))) : null;
+    mainIds.size ? el("option", { value:"main", text:"Boje główne (średnia)" }) : null, relIds.map(id => el("option", { value:id, text:HZ.exById(id).name }))) : null;
   if (exSel) exSel.value = relEx;
   return [el("div", { class:"card" },
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
         BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
       el("p", { class:"small muted", text: board ? board.desc : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
       opts.relPrompt && rankSort === "rel" ? opts.relPrompt : null,
+      rankSort === "rel" && relEx === "main" ? el("p", { class:"small muted", text:"Liczą się boje, które trener daje w treningu głównym: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(", ") + "." }) : null,
       exSel, podium,
       me && me.place !== "–" ? el("p", { class:"small", text:`Twoje miejsce: ${me.place} z ${placed.filter(x => x.place !== "–").length}` }) : null),
     el("div", { class:"card" }, el("h3", { text:"Tabela ogólna" }),
