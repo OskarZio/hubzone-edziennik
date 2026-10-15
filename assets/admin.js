@@ -273,7 +273,7 @@ function clientsView(){
   if (A.clientId){
     const c = A.clients.find(x => x.id === A.clientId) || { name:"Klient" };
     return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })),
-      ...(A.clientLogs ? HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render) : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
+      ...(A.clientLogs ? [A.clientLogs.length ? HZ.personalStats(A.clientLogs, `Statystyki: ${c.name || "klient"}`) : null, ...HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render)] : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
   }
   if (!A.clients.length) return [el("div", { class:"empty" }, el("h3", { text:"Brak klientów" }), el("p", { class:"small", text:"Klienci pojawią się tu po założeniu konta na stronie głównej z kodem klubu." }))];
   return [el("div", { class:"card" },

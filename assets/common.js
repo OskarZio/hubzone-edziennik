@@ -342,62 +342,114 @@ HZ.lineChart = (pts, { ticks, fmt }) => {
   return box;
 };
 
-/* ---------- stats & ranking ---------- */
-HZ.POINTS = { workout:10, pr:5 };
+/* ---------- stats & ranking ----------
+   Two separate boards:
+   - general (points): rewards showing up — 10 per group workout, +5 for each Friday that continues a streak. Weights don't matter.
+   - strength: 5 per personal record + average % progress of top working weight. */
+HZ.POINTS = { workout:10, streak:5, pr:5 };
 HZ.computeStats = (logs) => {
   const sorted = [...logs].sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.saved_at||"").localeCompare(b.saved_at||""));
   const attended = new Set(logs.filter(l => l.workout_id && !l.own).map(l => l.workout_id));
   const today = HZ.todayISO(); const past = HZ.sortedWorkouts().filter(w => w.date <= today);
+  // attendance, streaks, general points
+  let run = 0, longest = 0, bonus = 0, prevAttended = false, firstIdx = -1;
+  past.forEach((w, i) => {
+    const here = attended.has(w.id);
+    if (here){ if (firstIdx < 0) firstIdx = i; if (prevAttended) bonus += HZ.POINTS.streak; run++; longest = Math.max(longest, run); }
+    else if (w.date !== today) run = 0;
+    prevAttended = here || (w.date === today && prevAttended);
+  });
   let streak = 0;
   for (let i = past.length - 1; i >= 0; i--){ if (attended.has(past[i].id)) streak++; else if (past[i].date === today) continue; else break; }
-  const best = {}, span = {}; let prs = 0, volume = 0;
+  const pastAttended = past.filter(w => attended.has(w.id)).length;
+  const possible = firstIdx < 0 ? 0 : past.length - firstIdx - (past.length && past[past.length-1].date === today && !attended.has(past[past.length-1].id) ? 1 : 0);
+  const attendancePct = possible > 0 ? Math.round(pastAttended / possible * 100) : null;
+  // records & progress (working sets only)
+  const best = {}, span = {}, records = {}; let prs = 0, volume = 0;
   for (const l of sorted) for (const e0 of (l.entries || [])){
     const e = HZ.workEntry(e0); if (!e) continue;
-    const t = e.type || "kg", k = e.exId + "|" + t; let v;
-    if (t === "kg"){ v = Math.max(...e.sets.map(s => Number(s.load) || 0)); volume += e.sets.reduce((a,s) => a + (Number(s.load) || 0) * (s.reps || 0), 0); }
-    else if (t === "band"){ const ld = HZ.workLoad(e); v = ld === "none" ? S.config.bands.length : HZ.bandIdx(ld); if (v < 0) continue; }
-    else v = e.sets.reduce((a,s) => a + (s.reps || 0), 0);
-    if (k in best){ if (v > best[k]){ prs++; best[k] = v; } } else best[k] = v;
+    const t = e.type || "kg", k = e.exId + "|" + t; let v, label;
+    if (t === "kg"){ v = Math.max(...e.sets.map(s => Number(s.load) || 0)); const top = e.sets.filter(s => (Number(s.load) || 0) === v);
+      label = `${HZ.fmtKg(v)} kg × ${Math.max(...top.map(s => s.reps || 0))}`; volume += e.sets.reduce((a,s) => a + (Number(s.load) || 0) * (s.reps || 0), 0); }
+    else if (t === "band"){ const ld = HZ.workLoad(e); v = ld === "none" ? S.config.bands.length : HZ.bandIdx(ld); if (v < 0) continue; label = (ld === "none" ? "bez gumy" : HZ.bandFull(ld)) + ` × ${Math.max(...e.sets.map(s => s.reps || 0))}`; }
+    else { v = e.sets.reduce((a,s) => a + (s.reps || 0), 0); label = `${v} powt. łącznie`; }
+    if (k in best){ if (v > best[k]){ prs++; best[k] = v; records[k] = { exId:e.exId, type:t, name:e.exName, label, date:l.date }; } }
+    else { best[k] = v; records[k] = { exId:e.exId, type:t, name:e.exName, label, date:l.date }; }
     if (t === "kg" && v > 0) span[k] = span[k] ? { first:span[k].first, last:v, n:span[k].n + 1 } : { first:v, last:v, n:1 };
   }
   const pct = Object.values(span).filter(x => x.n > 1).map(x => (x.last - x.first) / x.first * 100);
-  return { workouts:attended.size, streak, prs, progress: pct.length ? Math.round(pct.reduce((a,b) => a + b, 0) / pct.length) : null,
-    volume: Math.round(volume), points: attended.size * HZ.POINTS.workout + prs * HZ.POINTS.pr };
+  const progress = pct.length ? Math.round(pct.reduce((a,b) => a + b, 0) / pct.length) : null;
+  return {
+    workouts:attended.size, streak, longest, prs, progress, volume: Math.round(volume),
+    points: attended.size * HZ.POINTS.workout + bonus,
+    strength: prs * HZ.POINTS.pr + Math.max(0, progress || 0),
+    attendancePct, records: Object.values(records)
+  };
 };
+HZ.rankRow = st => { const { records, attendancePct, ...row } = st; return row; };   // what goes to the shared ranking
+
+const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [
-  ["points", "Punkty", r => r.points],
-  ["workouts", "Treningi", r => r.workouts],
-  ["streak", "Seria", r => r.streak],
-  ["prs", "Rekordy", r => r.prs],
+  ["points", "Pkt ogólne", r => r.points ?? 0],
+  ["strength", "Pkt siłowe", r => r.strength ?? 0],
+  ["workouts", "Treningi", r => r.workouts ?? 0],
+  ["streak", "Seria", r => r.streak ?? 0],
+  ["prs", "Rekordy", r => r.prs ?? 0],
   ["progress", "Progres", r => r.progress == null ? "–" : (r.progress > 0 ? "+" : "") + r.progress + "%"],
-  ["volume", "Tonaż", r => r.volume >= 1000 ? (r.volume / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : r.volume + " kg"]
+  ["volume", "Tonaż", r => fmtVol(r.volume || 0)]
+];
+const BOARDS = [
+  { key:"points", label:"Ranking ogólny", unit:"pkt", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
+  { key:"strength", label:"Ranking siłowy", unit:"pkt", desc:`Za siłę: ${HZ.POINTS.pr} pkt za każdy rekord osobisty + średni progres największego ciężaru w %. Każdy porównywany jest sam ze sobą, więc liczy się postęp, nie masa ciała.` }
 ];
 let rankSort = "points";
 HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const vis = rows.filter(r => !r.hidden || opts.showHidden);
   if (!vis.length) return [el("div", { class:"empty" }, el("h3", { text:"Ranking jest jeszcze pusty" }), el("p", { class:"small", text:"Pojawi się, gdy uczestnicy zapiszą pierwsze treningi." }))];
   const val = r => r[rankSort] == null ? -Infinity : r[rankSort];
-  const sorted = [...vis].sort((a,b) => val(b) - val(a) || (b.points - a.points) || (a.name || "").localeCompare(b.name || "", "pl"));
+  const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((b.points||0) - (a.points||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
   const placed = sorted.map((r, i) => { if (val(r) !== prev){ place = i + 1; prev = val(r); } return { r, place }; });
   const col = RANK_COLS.find(c => c[0] === rankSort);
+  const board = BOARDS.find(b => b.key === rankSort);
   const podium = el("div", { class:"podium" }, placed.slice(0, 3).map(({ r, place }) => el("div", { class:"pod p" + place + (r.id === meId ? " me" : "") },
-    el("span", { class:"pl", text: place + "." }), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (rankSort === "points" ? " pkt" : "") }))));
-  const sortBar = el("div", { class:"modes", role:"group", "aria-label":"Sortuj ranking" },
-    RANK_COLS.map(([k, label]) => el("button", { type:"button", "aria-pressed":String(rankSort === k), onclick(){ rankSort = k; rerender(); }, text:label })));
+    el("span", { class:"pl", text: place + "." }), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board ? " pkt" : "") }))));
   const me = placed.find(x => x.r.id === meId);
   return [el("div", { class:"card" },
-      el("div", { class:"stack", style:"gap:2px" }, el("h2", { text:"Ranking" }),
-        el("span", { class:"small muted", text:`Punkty: ${HZ.POINTS.workout} za trening z grupą, ${HZ.POINTS.pr} za rekord. Seria to piątki z rzędu.` })),
-      sortBar, podium,
+      el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
+        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
+      el("p", { class:"small muted", text: board ? board.desc : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
+      podium,
       me ? el("p", { class:"small", text:`Twoje miejsce: ${me.place} z ${placed.length}` }) : null),
     el("div", { class:"card" }, el("h3", { text:"Tabela ogólna" }),
       el("div", { class:"tablewrap" }, el("table", { class:"rank" },
-        el("thead", {}, el("tr", {}, el("th", { text:"#" }), el("th", { text:"Imię" }), RANK_COLS.map(([k, label]) => el("th", { class: k === rankSort ? "on" : null, text:label })))),
+        el("thead", {}, el("tr", {}, el("th", { text:"#" }), el("th", { text:"Imię" }),
+          RANK_COLS.map(([k, label]) => el("th", { class: k === rankSort ? "on" : null }, el("button", { type:"button", class:"thsort", onclick(){ rankSort = k; rerender(); }, text: label + (k === rankSort ? " ↓" : "") }))))),
         el("tbody", {}, placed.map(({ r, place }) => el("tr", { class: r.id === meId ? "me" : null },
           el("td", { text:place }), el("td", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }),
           RANK_COLS.map(([k,, f]) => el("td", { class: k === rankSort ? "on" : null, text:f(r) }))))))),
-      el("p", { class:"small muted", text:"Rekord: lepszy wynik niż wszystkie poprzednie w danym ćwiczeniu i trybie. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: suma ciężar × powtórzenia w seriach roboczych." }))];
+      el("p", { class:"small muted", text:"Seria: piątki z rzędu. Rekord: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i sposobie wykonania. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: ciężar × powtórzenia w seriach roboczych." }))];
+};
+
+/* individual stats card (client: Postępy; trainer: client history) */
+HZ.personalStats = (logs, title) => {
+  const st = HZ.computeStats(logs);
+  const tile = (label, value, sub) => el("div", { class:"stat" }, el("span", { class:"eyebrow", text:label }), el("span", { class:"v", text:value }), sub ? el("span", { class:"small muted", text:sub }) : null);
+  const recs = [...st.records].sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl"));
+  return el("div", { class:"card" },
+    el("h2", { text:title }),
+    el("div", { class:"grid3" },
+      tile("Treningi z grupą", st.workouts, st.attendancePct == null ? null : `${st.attendancePct}% obecności`),
+      tile("Seria", st.streak, `najdłuższa: ${st.longest}`),
+      tile("Rekordy", st.prs, st.progress == null ? null : `progres ${st.progress > 0 ? "+" : ""}${st.progress}%`),
+      tile("Pkt ogólne", st.points),
+      tile("Pkt siłowe", st.strength),
+      tile("Tonaż", fmtVol(st.volume))),
+    recs.length ? el("div", { class:"stack", style:"gap:4px" }, el("h3", { text:"Rekordy osobiste" }),
+      el("div", { class:"list" }, recs.map(r => el("div", { class:"row between", style:"flex-wrap:nowrap" },
+        el("span", { style:"min-width:0", text: r.name + (st.records.filter(x => x.exId === r.exId).length > 1 ? ` (${HZ.MODE_LABEL[r.type].toLowerCase()})` : "") }),
+        el("span", { class:"num", style:"font-size:1.1rem;font-weight:600;white-space:nowrap", text:r.label }),
+        el("span", { class:"small muted", style:"white-space:nowrap", text:HZ.fmtDate(r.date) }))))) : null);
 };
 
 /* ---------- auth screens ---------- */

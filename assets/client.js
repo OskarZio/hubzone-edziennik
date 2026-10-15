@@ -55,7 +55,7 @@ function header(){
 /* ---------- ranking ---------- */
 async function syncRanking(){
   if (!S.config.rankingEnabled || !C.profile || !C.session) return;
-  const row = { name:C.profile.name || "", ...HZ.computeStats(C.logs), hidden: !!C.rankHidden };
+  const row = { name:C.profile.name || "", ...HZ.rankRow(HZ.computeStats(C.logs)), hidden: !!C.rankHidden };
   const key = JSON.stringify(row); if (key === C.rankKey) return;
   const { error } = await HZ.api.saveRanking(C.session.user.id, { ...row, updatedAt:new Date().toISOString() });
   if (!error){ C.rankKey = key; if (C.rankRows) loadRanking(); }
@@ -70,7 +70,7 @@ function rankingTab(){
 }
 function body(){
   if (C.tab === "ranking" && S.config.rankingEnabled) return rankingTab();
-  if (C.tab === "progress") return HZ.progressView(C.logs, "Twoje postępy", "me", render);
+  if (C.tab === "progress") return C.logs.length ? [HZ.personalStats(C.logs, "Twoje statystyki"), ...HZ.progressView(C.logs, "Twoje postępy", "me", render)] : HZ.progressView(C.logs, "Twoje postępy", "me", render);
   if (C.tab === "own" && S.config.ownEnabled) return ownView();
   if (C.tab === "account") return accountView();
   return todayView();
