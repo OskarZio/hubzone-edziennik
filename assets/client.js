@@ -5,7 +5,7 @@ const { el, S, toast } = HZ;
 const app = document.getElementById("app");
 const C = { session:null, profile:null, logs:[], loaded:false, tab:"today", authMode:"login", sel:null, drafts:{}, own:null, error:null };
 
-function render(){ const y = window.scrollY; app.replaceChildren(...view()); window.scrollTo(0, y); }
+function render(){ HZ.swap(app, view()); }
 const draftsKey = () => "hz-drafts-" + (C.session ? C.session.user.id : "x");
 const ownKey = () => "hz-own-" + (C.session ? C.session.user.id : "x");
 const saveDrafts = (() => { let t; return () => { clearTimeout(t); t = setTimeout(() => HZ.LS.set(draftsKey(), C.drafts), 400); }; })();

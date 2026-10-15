@@ -9,22 +9,27 @@ service cloud.firestore {
     function isMember() { return signedIn() && exists(me()); }
     function isAdmin() { return signedIn() && get(me()).data.isAdmin == true; }
     function club() { return /databases/$(database)/documents/settings/club; }
+    // client without an account, created by the trainer (no phone etc.)
+    function isManual(uid) { return get(/databases/$(database)/documents/users/$(uid)).data.manual == true; }
 
     // Profil: tworzy go sam klient przy rejestracji, tylko z poprawnym kodem klubu
     // (dopóki trener nie ustawi kodu, rejestracja jest otwarta).
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow create: if signedIn() && request.auth.uid == uid
+      allow create: if (isAdmin() && request.resource.data.manual == true && request.resource.data.isAdmin == false
+          && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'manual', 'createdAt'])
+          && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60)
+        || (signedIn() && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'joinCode', 'createdAt'])
         && request.resource.data.isAdmin == false
         && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
         && request.resource.data.email == request.auth.token.email
-        && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode);
+        && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
       // klient może zmienić tylko swoje imię; rolę trenera nadajesz ręcznie w konsoli Firebase
-      allow update: if signedIn() && request.auth.uid == uid
+      allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.manual == true))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
         && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60;
-      allow delete: if false;
+      allow delete: if isAdmin() && resource.data.manual == true;
     }
 
     // Kod klubu: tylko trener.
@@ -45,7 +50,7 @@ service cloud.firestore {
     // Ranking: każdy członek klubu widzi tabelę, ale zapisuje tylko swój wiersz.
     match /ranking/{uid} {
       allow read: if isMember();
-      allow create, update: if isMember() && request.auth.uid == uid
+      allow create, update: if ((isMember() && request.auth.uid == uid) || isAdmin())
         && request.resource.data.keys().hasOnly(['name', 'workouts', 'streak', 'longest', 'prs', 'progress', 'volume', 'points', 'strength', 'hidden', 'updatedAt'])
         && request.resource.data.name is string && request.resource.data.name.size() <= 60
         && request.resource.data.points is int && request.resource.data.points >= 0 && request.resource.data.points <= 100000
@@ -57,7 +62,6 @@ service cloud.firestore {
     function validLog() {
       let d = request.resource.data;
       return d.keys().hasOnly(['user_id', 'workout_id', 'date', 'own', 'title', 'fatigue', 'note', 'entries', 'saved_at'])
-        && d.user_id == request.auth.uid
         && d.date is string && d.date.size() == 10
         && d.own is bool
         && (d.fatigue == null || (d.fatigue is int && d.fatigue >= 1 && d.fatigue <= 10))
@@ -67,8 +71,10 @@ service cloud.firestore {
     }
     match /logs/{id} {
       allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
-      allow create: if isMember() && validLog();
-      allow update: if isMember() && resource.data.user_id == request.auth.uid && validLog();
+      allow create: if validLog() && ((isMember() && request.resource.data.user_id == request.auth.uid)
+        || (isAdmin() && isManual(request.resource.data.user_id)));
+      allow update: if validLog() && request.resource.data.user_id == resource.data.user_id
+        && ((isMember() && resource.data.user_id == request.auth.uid) || (isAdmin() && isManual(resource.data.user_id)));
       allow delete: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
   }

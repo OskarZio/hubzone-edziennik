@@ -66,6 +66,10 @@ Podpowiedź patrzy na ostatni zapis danego ćwiczenia (serie robocze):
 
 Klient wybiera skok przyciskiem (np. „+1,25 → 41,25 kg” albo „+2,5 → 42,5 kg”), a sugerowana liczba powtórzeń pojawia się w polach serii. Zakres skoku ustawiasz osobno dla każdego ćwiczenia. Gumy układasz od najmocniejszej do najsłabszej.
 
+## Klienci bez konta
+
+Dla osób bez telefonu: **Klienci → Dodaj klienta bez konta** (wystarczy imię). Wyniki wpisujesz za nich w zakładce **Wyniki → Wpisz wyniki** (ten sam formularz co u klienta: podpowiedzi, gumy, serie wstępne). Pojawiają się w rankingu, statystykach i eksporcie CSV.
+
 ## Ranking i tabela ogólna
 
 - **Punkty**: 10 za każdy trening z grupą + 5 za każdy rekord.

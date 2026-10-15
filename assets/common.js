@@ -16,7 +16,7 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, created_at:d.createdAt || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, created_at:d.createdAt || null } : null;
 HZ.api = {
   /* auth */
   onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email } } : null)); },
@@ -39,6 +39,12 @@ HZ.api = {
   ranking: () => wrap(async () => list(await db.collection("ranking").get())),
   myRanking: uid => wrap(async () => { const s = await db.doc("ranking/" + uid).get(); return s.exists ? s.data() : null; }),
   saveRanking: (uid, row) => wrap(() => db.doc("ranking/" + uid).set(row)),
+  /* clients without an account (no phone): created and filled in by the trainer */
+  addManualClient: name => wrap(async () => { const id = "m_" + HZ.uuid().replace(/-/g, "").slice(0, 20);
+    const doc = { name, email:"", isAdmin:false, manual:true, createdAt:new Date().toISOString() };
+    await db.doc("users/" + id).set(doc); return asProfile(id, doc); }),
+  renameManualClient: (id, name) => wrap(() => db.doc("users/" + id).update({ name })),
+  deleteManualClient: id => wrap(async () => { await db.doc("ranking/" + id).delete().catch(() => {}); await db.doc("users/" + id).delete(); }),
   getClub: () => wrap(async () => { const s = await db.doc("settings/club").get(); return s.exists ? (s.data().joinCode || null) : null; }),
   setClub: code => wrap(() => db.doc("settings/club").set({ joinCode:code })),
   saveWorkout: row => wrap(async () => { const { id, ...body } = row; await db.doc("workouts/" + id).set(body); return row; }),
@@ -99,6 +105,12 @@ HZ.supersetInfo = stations => { const lb = HZ.stationLabels(stations), out = {};
 HZ.TYPE_LABEL = { kg:"ciężar (kg)", band:"guma (asysta)", bw:"masa ciała" };
 HZ.plural = (n, one, few, many) => n === 1 ? one : (n%10 >= 2 && n%10 <= 4 && (n%100 < 10 || n%100 >= 20)) ? few : many;
 
+/* re-render keeping scroll and the field the user just tapped */
+HZ.swap = (app, nodes) => {
+  const y = window.scrollY, a = document.activeElement, id = a && a.id, sel = a && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
+  app.replaceChildren(...nodes.filter(Boolean)); window.scrollTo(0, y);
+  if (id){ const n = document.getElementById(id); if (n && n !== a){ n.focus({ preventScroll:true }); if (sel && typeof n.setSelectionRange === "function") try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
+};
 HZ.brand = (sub) => el("div", { class:"brand" }, el("span", { class:"mark", "aria-hidden":"true", text:"HZ" }),
   el("span", { class:"bt" }, el("b", { text:"Hubzone Weightlifting" }), el("span", { text: sub || "e-Dziennik" })));
 
@@ -281,7 +293,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
       el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" }, sw ? el("span", { class:"swatch", style:`background:${sw}` }) : null,
         s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text: ex.warmLabel || "Aktywacja łopatek" }) : HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v; if (s.warmup) s.manual = true;
           for (let j = i+1; j < sets.length; j++) if (!!sets[j].warmup === !!s.warmup && (JSON.stringify(sets[j].load) === JSON.stringify(old) || sets[j].load == null || sets[j].load === "")) sets[j].load = v;
-          onChange(true); }, `${keyPrefix}-l${i}`)),
+          setTimeout(() => onChange(true), 0); }, `${keyPrefix}-l${i}`)),
       el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type, ex) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
       s.warmup ? el("span", { class:"wlabel", text: warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? ex.warmLabel : "wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
