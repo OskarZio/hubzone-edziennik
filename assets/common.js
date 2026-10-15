@@ -276,7 +276,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
           onChange(true); }, `${keyPrefix}-l${i}`)),
       el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
-      s.warmup ? el("span", { class:"wlabel", text:"wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
+      s.warmup ? el("span", { class:"wlabel", text: ex.type === "band" && warmIdx(i) === 0 ? "aktywacja łopatek" : "wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
