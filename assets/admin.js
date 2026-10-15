@@ -68,7 +68,7 @@ function setupEmpty(){
       el("button", { class:"primary", onclick(){ A.tab = "settings"; render(); }, text:"Dodaj ćwiczenia" }),
       el("button", { async onclick(ev){ ev.currentTarget.disabled = true;
         const bands = [["Czarna","#222222"],["Fioletowa","#7048E8"],["Zielona","#2F9E44"],["Czerwona","#E03131"],["Żółta","#FAB005"]].map(([name,color]) => ({ id:HZ.uuid(), name, color }));
-        const exercises = [["Przysiad ze sztangą","kg",1.25,2.5,20],["Wyciskanie hantli","kg",1,2,null],["Martwy ciąg rumuński","kg",1.25,2.5,20],["Podciąganie","band",1.25,2.5,null],["Pompki","bw",1.25,2.5,null]].map(([name,type,incMin,incMax,warmStart]) => ({ id:HZ.uuid(), name, type, incMin, incMax, warmStart }));
+        const exercises = [["Przysiad ze sztangą","kg",1.25,2.5,20],["Wyciskanie hantli","kg",1,2,null],["Martwy ciąg rumuński","kg",1.25,2.5,20],["Podciąganie","band",1.25,2.5,null],["Pompki","kg",1.25,2.5,null]].map(([name,type,incMin,incMax,warmStart]) => ({ id:HZ.uuid(), name, type, incMin, incMax, warmStart }));
         const { error } = await HZ.api.saveLibrary({ exercises, bands });
         if (error){ toast(HZ.dbError(error)); render(); return; }
         await HZ.loadConfig(); toast("Wczytano przykład. Popraw go w zakładce Ćwiczenia i ustawienia."); render(); }, text:"Wczytaj przykład" })));
@@ -79,14 +79,14 @@ function settingsView(){
   if (!A.editC) A.editC = HZ.clone(S.config);
   const c = A.editC;
   const exCard = el("div", { class:"card" }, el("h2", { text:"Ćwiczenia" }),
-    el("p", { class:"small muted", text:"Klient sam wybiera na stacji: ciężar, guma albo masa ciała. Tu ustawiasz sposób domyślny, zakres skoku ciężaru (np. 1,25–2,5 kg) i ciężar 1. serii wstępnej (np. pusty gryf 20 kg). Kolejne serie wstępne aplikacja podnosi sama: 2. ok. 60% ciężaru roboczego na 3–4 powt., 3. ok. 80% na 1–2 powt." }),
+    el("p", { class:"small muted", text:"Klient sam wybiera na stacji: ciężar albo guma. Tu ustawiasz sposób domyślny, zakres skoku ciężaru (np. 1,25–2,5 kg) i ciężar 1. serii wstępnej (np. pusty gryf 20 kg). Kolejne serie wstępne aplikacja podnosi sama: 2. ok. 60% ciężaru roboczego na 3–4 powt., 3. ok. 80% na 1–2 powt." }),
     el("div", { class:"list" }, c.exercises.map((e, i) => el("div", { class:"stack" },
       el("div", { class:"row", style:"flex-wrap:nowrap" },
         el("input", { id:`ex-n-${e.id || i}`, maxlength:"80", value:e.name, "aria-label":"Nazwa ćwiczenia", placeholder:"Nazwa ćwiczenia", oninput(ev){ e.name = ev.target.value; } }),
         el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.exercises[i-1], c.exercises[i]] = [c.exercises[i], c.exercises[i-1]]; render(); }, text:"↑" }),
         el("button", { class:"ghost", "aria-label":"Usuń ćwiczenie", onclick(){ c.exercises.splice(i, 1); render(); }, text:"✕" })),
       el("div", { class:"grid2" },
-        el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).map(([k,v]) => el("option", { value:k, text:v })))),
+        el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).filter(([k]) => k !== "bw").map(([k,v]) => el("option", { value:k, text:v })))),
         el("label", { class:"f" }, "1. seria wstępna (kg)", el("input", { id:`ex-ws-${e.id || i}`, inputmode:"decimal", value: e.warmStart ? HZ.fmtKg(e.warmStart) : "", placeholder:"np. 20 (gryf)", oninput(ev){ e.warmStart = HZ.parseNum(ev.target.value); } })),
         el("label", { class:"f" }, "Skok ciężaru (kg)", el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" },
           el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),

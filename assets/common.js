@@ -126,7 +126,7 @@ HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(lo
 /* ---------- data ---------- */
 HZ.loadConfig = async () => {
   const s = await db.doc("config/library").get(); const d = s.exists ? s.data() : {};
-  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false };
+  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false };
 };
 HZ.loadWorkouts = async () => { S.workouts = list(await db.collection("workouts").get()); };
 HZ.dbError = (e) => {
@@ -309,7 +309,7 @@ function customJump(sg, onPick, current){
 /* participant picks how they do the exercise: weight, band or bodyweight */
 HZ.MODE_LABEL = { kg:"Ciężar", band:"Guma", bw:"Masa ciała" };
 HZ.modeToggle = (cur, onPick) => el("div", { class:"modes", role:"group", "aria-label":"Sposób wykonania" },
-  ["kg","band","bw"].filter(m => m !== "band" || S.config.bands.length).map(m => el("button", { type:"button", "aria-pressed":String(cur === m), onclick(){ if (cur !== m) onPick(m); }, text:HZ.MODE_LABEL[m] })));
+  ["kg","band"].filter(m => m !== "band" || S.config.bands.length).map(m => el("button", { type:"button", "aria-pressed":String(cur === m), onclick(){ if (cur !== m) onPick(m); }, text:HZ.MODE_LABEL[m] })));
 /* working sets reset to a new load (warm-ups without reps follow for kg) */
 HZ.applyLoad = (ex, sets, load) => {
   for (const s of sets) if (!s.warmup) s.load = load;

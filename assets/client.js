@@ -85,7 +85,7 @@ function draftFor(w){
   for (const st of (w.stations || [])){
     const ex = HZ.exById(st.exId); if (!ex) continue;
     const prev = existing && (existing.entries || []).find(e => e.stationId === st.id);
-    d.mode[st.id] = prev ? (prev.type || ex.type) : ex.type;
+    d.mode[st.id] = prev && prev.type !== "bw" ? (prev.type || ex.type) : ex.type;
     if (prev) d.st[st.id] = prev.sets.map(s => ({ load:s.load ?? null, reps:s.reps ?? null, rir:s.rir ?? null, ...(s.warmup ? { warmup:true } : {}) }));
     else d.st[st.id] = freshSets(w, st, ex, d.mode[st.id]);
   }
@@ -128,7 +128,7 @@ function freshSets(w, st, ex, mode){
 }
 function stationCard(w, st, exBase, label, d, isSuper){
   d.mode = d.mode || {};
-  const mode = d.mode[st.id] || exBase.type; const ex = { ...exBase, type:mode };
+  const mode = (d.mode[st.id] && d.mode[st.id] !== "bw" ? d.mode[st.id] : null) || exBase.type; const ex = { ...exBase, type:mode };
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
   const tRir = HZ.targetRir(w, st);
   const sg = HZ.suggest(C.logs, ex.id, mode, exBase, w.id, tRir);
@@ -178,7 +178,7 @@ function ownView(){
       const last = HZ.history(C.logs, id, null, ex.type)[0]; const tr = last ? last.entry.targetReps : 8; const ts = last ? last.entry.targetSets : 3;
       o.items.push({ key:HZ.uuid().slice(0,8), exId:id, mode:ex.type, targetReps:tr, targetSets:ts, sets:HZ.buildSets(ex, 0, ts, sg.next ?? null) });
       persist(true); }, text:"+ Dodaj do treningu" }))];
-  o.items.forEach((it, idx) => { const exBase = HZ.exById(it.exId); if (!exBase) return; const mode = it.mode || exBase.type; const ex = { ...exBase, type:mode };
+  o.items.forEach((it, idx) => { const exBase = HZ.exById(it.exId); if (!exBase) return; const mode = (it.mode && it.mode !== "bw" ? it.mode : null) || exBase.type; const ex = { ...exBase, type:mode };
     const sg = HZ.suggest(C.logs, ex.id, mode, exBase); const curLoad = (it.sets.find(s => !s.warmup) || {}).load;
     out.push(el("section", { class:"card station" },
       el("div", { class:"row between" }, el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:"Ćwiczenie" }), el("h3", { text:ex.name })),
