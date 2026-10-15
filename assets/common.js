@@ -112,7 +112,7 @@ HZ.parseKgRange = t => { const m = String(t || "").replace(/,/g, ".").match(/^\s
 HZ.bandKgText = b => !b || !b.kg ? "" : b.kgMax ? `${HZ.fmtKg(b.kg)}–${HZ.fmtKg(b.kgMax)}` : HZ.fmtKg(b.kg);
 HZ.bandKgMid = b => !b || !b.kg ? 0 : b.kgMax ? (Number(b.kg) + Number(b.kgMax)) / 2 : Number(b.kg);
 HZ.bandFull = id => { const b = S.config.bands.find(b => b.id === id); return b ? b.name + (b.kg ? ` (~${HZ.bandKgText(b)} kg)` : "") : HZ.bandName(id); };
-HZ.bandName = id => { if (id === "none") return "bez gumy"; const b = S.config.bands.find(b => b.id === id); return b ? b.name : "?"; };
+HZ.bandName = id => { if (id === HZ.SCAP) return "aktywacja łopatek"; if (id === "none") return "bez gumy"; const b = S.config.bands.find(b => b.id === id); return b ? b.name : "?"; };
 HZ.sortedWorkouts = () => [...S.workouts].sort((a,b) => (a.date||"").localeCompare(b.date||""));
 HZ.workoutNo = id => HZ.sortedWorkouts().findIndex(w => w.id === id) + 1;
 HZ.defaultWorkoutId = () => {
@@ -152,15 +152,16 @@ HZ.warmSets = e => (e.sets || []).filter(s => s.warmup);
    W1 = movement practice: empty bar / strongest band, 5–6 reps
    W2 ≈ 60% of working weight, 3–4 reps
    W3 ≈ 80% (70–80%), 1–2 reps   e.g. working 90 kg → 72,5 kg  (75 kg would be 83%) */
-HZ.WARM_REPS = (i, n) => i === 0 ? "5–6" : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
+HZ.WARM_REPS = (i, n, type) => i === 0 ? (type === "band" ? "6–8" : "5–6") : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
+HZ.SCAP = "scap";   // band mode, 1st warm-up: scapular activation on the bar, no band
 HZ.warmPct = (i, n) => n === 1 ? 0.5 : i === 0 ? 0.45 : n === 2 ? 0.6 : n === 3 ? [0.45, 0.6, 0.8][i] : 0.5 + 0.3 * (i - 1) / (n - 2);
 HZ.warmupLoads = (ex, n, next) => {
   if (!n) return [];
   if (ex.type === "band"){
     const bands = S.config.bands; if (!bands.length) return Array(n).fill("");
     let w = next === "none" ? bands.length : HZ.bandIdx(next); if (w < 0) w = bands.length;
-    const top = Math.max(0, w - 1);                       // last warm-up: one band stronger than the working one
-    return Array.from({ length:n }, (_, i) => bands[Math.min(bands.length - 1, n === 1 ? 0 : Math.round(top * i / (n - 1)))].id);
+    const top = Math.max(0, w - 1), m = n - 1;            // W1 = scapular activation, then strongest band → one stronger than working
+    return [HZ.SCAP, ...Array.from({ length:m }, (_, i) => bands[Math.min(bands.length - 1, m === 1 ? top : Math.round(top * i / (m - 1)))].id)];
   }
   if (ex.type !== "kg") return Array(n).fill(null);
   const step = HZ.incRange(ex)[0], start = Number(ex.warmStart) > 0 ? Number(ex.warmStart) : null;
@@ -271,12 +272,12 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     return el("div", { class:"set" + (s.warmup ? " warm" : "") },
       el("span", { class:"n", title: s.warmup ? "Seria wstępna" : null, text:label }),
       el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" }, sw ? el("span", { class:"swatch", style:`background:${sw}` }) : null,
-        HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v;
+        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text:"Aktywacja łopatek" }) : HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v;
           for (let j = i+1; j < sets.length; j++) if (!!sets[j].warmup === !!s.warmup && (JSON.stringify(sets[j].load) === JSON.stringify(old) || sets[j].load == null || sets[j].load === "")) sets[j].load = v;
           onChange(true); }, `${keyPrefix}-l${i}`)),
-      el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
+      el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
-      s.warmup ? el("span", { class:"wlabel", text: ex.type === "band" && warmIdx(i) === 0 ? "aktywacja łopatek" : "wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
+      s.warmup ? el("span", { class:"wlabel", text:"wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
