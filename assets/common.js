@@ -509,7 +509,7 @@ HZ.relStrength = (bests, bw) => { const out = {}; if (!(bw > 0)) return out;
   for (const [id, kg] of Object.entries(bests || {})){ const ex = HZ.exById(id); out[id] = Math.round((HZ.isBwExercise(ex) ? bw + kg : kg) / bw * 100); }
   return out; };
 /* what goes to the shared ranking: body weight itself never leaves the profile, only the percentages */
-HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, ...row } = st; return { ...row, rel: HZ.relStrength(bests, bw) }; };
+HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw) }; };
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [
@@ -531,35 +531,42 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const vis = rows.filter(r => !r.hidden || opts.showHidden);
   if (!vis.length) return [el("div", { class:"empty" }, el("h3", { text:"Ranking jest jeszcze pusty" }), el("p", { class:"small", text:"Pojawi się, gdy uczestnicy zapiszą pierwsze treningi." }))];
   // exercises available for relative strength
-  const relIds = [...new Set(vis.flatMap(r => Object.keys(r.rel || {})))].filter(id => HZ.exById(id))
+  const relIds = [...new Set(vis.flatMap(r => [...Object.keys(r.rel || {}), ...Object.keys(r.bests || {})]))].filter(id => HZ.exById(id))
     .sort((a,b) => vis.filter(r => r.rel && r.rel[b] != null).length - vis.filter(r => r.rel && r.rel[a] != null).length);
   // main lifts = exercises the trainer puts in the "Trening główny" section
   const mainIds = new Set(S.workouts.flatMap(w => (w.stations || []).filter(st => HZ.secOf(st) === "main").map(st => st.exId)));
   const relAvg = r => { const v = Object.entries(r.rel || {}).filter(([id]) => mainIds.has(id)).map(([, p]) => p); return v.length ? Math.round(v.reduce((a,b) => a + b, 0) / v.length) : null; };
   if (relEx !== "main" && !relIds.includes(relEx)) relEx = mainIds.size ? "main" : (relIds[0] || null);
   const relOf = r => relEx === "main" ? relAvg(r) : (r.rel && r.rel[relEx] != null ? r.rel[relEx] : null);
+  const kgOf = r => { const b = r.bests || {};
+    if (relEx === "main"){ const v = [...mainIds].map(id => b[id]).filter(x => x > 0); return v.length ? Math.round(v.reduce((a,c) => a + c, 0) * 100) / 100 : null; }
+    return b[relEx] > 0 ? b[relEx] : null; };
   const relCol = ["rel", "% MC", r => relOf(r) != null ? relOf(r) + "%" : "–"];
-  const cols = rankSort === "rel" ? [relCol, ...RANK_COLS] : RANK_COLS;
-  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : (r[rankSort] == null ? -Infinity : r[rankSort]);
+  const kgCol = ["kg", relEx === "main" ? "Suma kg" : "Ciężar", r => kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : "–"];
+  const strengthView = rankSort === "rel" || rankSort === "kg";
+  const cols = strengthView ? [relCol, kgCol, ...RANK_COLS] : RANK_COLS;
+  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (r[rankSort] == null ? -Infinity : r[rankSort]);
   const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((b.points||0) - (a.points||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
   const placed = sorted.map((r, i) => { if (val(r) !== prev){ place = i + 1; prev = val(r); } return { r, place: val(r) === -Infinity ? "–" : place }; });
   const col = cols.find(c => c[0] === rankSort) || cols[0];
-  const board = BOARDS.find(b => b.key === rankSort);
+  const board = BOARDS.find(b => b.key === (rankSort === "kg" ? "rel" : rankSort));
   const podiumRows = placed.filter(x => x.place !== "–").slice(0, 3);
   const podium = podiumRows.length ? el("div", { class:"podium" }, podiumRows.map(({ r, place }) => el("div", { class:"pod p" + place + (r.id === meId ? " me" : "") },
-    el("span", { class:"pl", text: place + "." }), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") }))))
+    el("span", { class:"pl", text: place + "." }), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") + (rankSort === "kg" && relOf(r) != null ? ` · ${relOf(r)}%` : rankSort === "rel" && kgOf(r) != null ? ` · ${HZ.fmtKg(kgOf(r))} kg` : "") }))))
     : el("p", { class:"small muted", text: rankSort === "rel" ? "Nikt jeszcze nie ma wyniku w tym ćwiczeniu z wpisaną masą ciała." : "Brak wyników." });
   const me = placed.find(x => x.r.id === meId);
-  const exSel = rankSort === "rel" && relIds.length ? el("select", { id:"rel-ex", "aria-label":"Ćwiczenie", onchange(e){ relEx = e.target.value; rerender(); } },
+  const exSel = strengthView && relIds.length ? el("select", { id:"rel-ex", "aria-label":"Ćwiczenie", onchange(e){ relEx = e.target.value; rerender(); } },
     mainIds.size ? el("option", { value:"main", text:"Boje główne (średnia)" }) : null, relIds.map(id => el("option", { value:id, text:HZ.exById(id).name }))) : null;
   if (exSel) exSel.value = relEx;
   return [el("div", { class:"card" },
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
-        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
-      el("p", { class:"small muted", text: board ? board.desc : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
-      opts.relPrompt && rankSort === "rel" ? opts.relPrompt : null,
-      rankSort === "rel" && relEx === "main" ? el("p", { class:"small muted", text:"Liczą się boje, które trener daje w treningu głównym: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(", ") + "." }) : null,
+        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && rankSort === "kg")), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
+      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
+      opts.relPrompt && strengthView ? opts.relPrompt : null,
+      strengthView ? el("div", { class:"modes", role:"group", "aria-label":"Sortuj według" },
+        [["rel","% masy ciała"],["kg","Ciężar (kg)"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankSort === k), onclick(){ rankSort = k; rerender(); }, text:t }))) : null,
+      strengthView && relEx === "main" ? el("p", { class:"small muted", text:"Liczą się boje, które trener daje w treningu głównym: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(", ") + "." }) : null,
       exSel, podium,
       me && me.place !== "–" ? el("p", { class:"small", text:`Twoje miejsce: ${me.place} z ${placed.filter(x => x.place !== "–").length}` }) : null),
     el("div", { class:"card" }, el("h3", { text:"Tabela ogólna" }),
@@ -569,7 +576,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
         el("tbody", {}, placed.map(({ r, place }) => el("tr", { class: r.id === meId ? "me" : null },
           el("td", { text:place }), el("td", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }),
           cols.map(([k,, f]) => el("td", { class: k === rankSort ? "on" : null, text:f(r) }))))))),
-      el("p", { class:"small muted", text:"Seria: piątki z rzędu. Rekord: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i sposobie wykonania. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: ciężar × powtórzenia w seriach roboczych. % MC: ciężar jako procent masy ciała." }))];
+      el("p", { class:"small muted", text:"Seria: piątki z rzędu. Rekord: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i sposobie wykonania. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: ciężar × powtórzenia w seriach roboczych. % MC: ciężar jako procent masy ciała. Ciężar / Suma kg: największy ciężar roboczy (suma z bojów głównych)." }))];
 };
 
 /* individual stats card (client: Postępy; trainer: client history) */
