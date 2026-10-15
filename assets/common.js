@@ -152,7 +152,7 @@ HZ.warmSets = e => (e.sets || []).filter(s => s.warmup);
    W1 = movement practice: empty bar / strongest band, 5–6 reps
    W2 ≈ 60% of working weight, 3–4 reps
    W3 ≈ 80% (70–80%), 1–2 reps   e.g. working 90 kg → 72,5 kg  (75 kg would be 83%) */
-HZ.WARM_REPS = (i, n, type) => i === 0 ? (type === "band" ? "6–8" : "5–6") : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
+HZ.WARM_REPS = (i, n, type, ex) => i === 0 ? ((ex && ex.warmReps) || (type === "band" ? "6–8" : "5–6")) : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
 HZ.SCAP = "scap";   // band mode, 1st warm-up: scapular activation on the bar, no band
 HZ.warmPct = (i, n) => n === 1 ? 0.5 : i === 0 ? 0.45 : n === 2 ? 0.6 : n === 3 ? [0.45, 0.6, 0.8][i] : 0.5 + 0.3 * (i - 1) / (n - 2);
 HZ.warmupLoads = (ex, n, next) => {
@@ -160,8 +160,14 @@ HZ.warmupLoads = (ex, n, next) => {
   if (ex.type === "band"){
     const bands = S.config.bands; if (!bands.length) return Array(n).fill("");
     let w = next === "none" ? bands.length : HZ.bandIdx(next); if (w < 0) w = bands.length;
-    const top = Math.max(0, w - 1), m = n - 1;            // W1 = scapular activation, then strongest band → one stronger than working
-    return [HZ.SCAP, ...Array.from({ length:m }, (_, i) => bands[Math.min(bands.length - 1, m === 1 ? top : Math.round(top * i / (m - 1)))].id)];
+    const top = Math.max(0, w - 1);
+    const ramp = (m, from = 0) => { const hi = Math.max(from, top);
+      return Array.from({ length:m }, (_, i) => bands[Math.min(bands.length - 1, m === 1 ? hi : Math.round(from + (hi - from) * i / (m - 1)))].id); };
+    // W1 set by the trainer per exercise: "scap" (no band, e.g. scapular activation), a specific band, or "auto" (ramp from the strongest)
+    const w1 = ex.warmBand === "auto" ? null : (ex.warmBand && bands.some(b => b.id === ex.warmBand) ? ex.warmBand : HZ.SCAP);
+    if (w1 === null) return ramp(n);
+    if (w1 === HZ.SCAP) return [w1, ...ramp(n - 1)];
+    const k = HZ.bandIdx(w1); return [w1, ...ramp(n - 1, Math.min(k + 1, Math.max(k, top)))];
   }
   if (ex.type !== "kg") return Array(n).fill(null);
   const step = HZ.incRange(ex)[0], start = Number(ex.warmStart) > 0 ? Number(ex.warmStart) : null;
@@ -272,12 +278,12 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     return el("div", { class:"set" + (s.warmup ? " warm" : "") },
       el("span", { class:"n", title: s.warmup ? "Seria wstępna" : null, text:label }),
       el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" }, sw ? el("span", { class:"swatch", style:`background:${sw}` }) : null,
-        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text:"Aktywacja łopatek" }) : HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v;
+        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text: ex.warmLabel || "Aktywacja łopatek" }) : HZ.loadInput(ex, s.load, v => { const old = s.load; s.load = v;
           for (let j = i+1; j < sets.length; j++) if (!!sets[j].warmup === !!s.warmup && (JSON.stringify(sets[j].load) === JSON.stringify(old) || sets[j].load == null || sets[j].load === "")) sets[j].load = v;
           onChange(true); }, `${keyPrefix}-l${i}`)),
-      el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
+      el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type, ex) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
-      s.warmup ? el("span", { class:"wlabel", text:"wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
+      s.warmup ? el("span", { class:"wlabel", text: warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? ex.warmLabel : "wstępna" }) : HZ.rirSelect(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
