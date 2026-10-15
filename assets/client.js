@@ -78,10 +78,21 @@ function body(){
 function currentId(){ const ws = HZ.sortedWorkouts(); if (C.sel && ws.some(w => w.id === C.sel)) return C.sel; return HZ.defaultWorkoutId(); }
 
 /* ---------- today ---------- */
+const DRAFT_V = 3;   // bump when warm-up rules change: untouched warm-ups in old drafts get recalculated
 function draftFor(w){
-  if (C.drafts[w.id]) return C.drafts[w.id];
+  const old = C.drafts[w.id];
+  if (old && old.v === DRAFT_V) return old;
+  if (old){
+    for (const st of (w.stations || [])){
+      const ex = HZ.exById(st.exId); const sets = old.st && old.st[st.id]; if (!ex || !sets) continue;
+      const mode = (old.mode && old.mode[st.id] && old.mode[st.id] !== "bw") ? old.mode[st.id] : ex.type;
+      const warm = sets.filter(x => x.warmup), work = sets.find(x => !x.warmup);
+      if (warm.length && warm.every(x => x.reps == null)) HZ.warmupLoads({ ...ex, type:mode }, warm.length, work ? (work.load === "" ? null : work.load) : null).forEach((l, k) => { warm[k].load = l; });
+    }
+    old.v = DRAFT_V; saveDrafts(); return old;
+  }
   const existing = C.logs.find(l => l.workout_id === w.id);
-  const d = { fatigue: existing ? existing.fatigue ?? null : null, note: existing ? existing.note || "" : "", st:{}, mode:{} };
+  const d = { v:DRAFT_V, fatigue: existing ? existing.fatigue ?? null : null, note: existing ? existing.note || "" : "", st:{}, mode:{} };
   for (const st of (w.stations || [])){
     const ex = HZ.exById(st.exId); if (!ex) continue;
     const prev = existing && (existing.entries || []).find(e => e.stationId === st.id);
