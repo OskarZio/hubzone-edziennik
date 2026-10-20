@@ -3,6 +3,18 @@
 "use strict";
 const HZ = window.HZ = {};
 
+/* ---------- security: refuse to run inside someone else's frame (clickjacking) ---------- */
+if (window.top !== window.self){
+  document.documentElement.style.display = "none";
+  try { window.top.location = window.self.location.href; } catch(e){}
+  throw new Error("framed");
+}
+
+/* ---------- privacy (RODO) ---------- */
+HZ.POLICY_VERSION = "2026-10-20";
+HZ.MIN_PASSWORD = 8;
+HZ.legal = window.HZ_LEGAL || {};
+
 /* ---------- Firebase ---------- */
 const cfg = window.HZ_FIREBASE || {};
 HZ.configured = !!(cfg.apiKey && cfg.projectId && !/TWOJ/.test(cfg.apiKey + cfg.projectId));
@@ -16,14 +28,33 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
+HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
+const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
 HZ.api = {
   /* auth */
   onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email } } : null)); },
   signOut: () => auth.signOut(),
   /* profiles */
   profile: uid => wrap(async () => { const s = await db.doc("users/" + uid).get(); return s.exists ? asProfile(uid, s.data()) : null; }),
-  createProfile: (uid, { name, email, joinCode }) => wrap(() => db.doc("users/" + uid).set({ name, email, isAdmin:false, joinCode, createdAt:new Date().toISOString() })),
+  createProfile: (uid, { name, email, joinCode, consent }) => wrap(() => db.doc("users/" + uid).set({ name, email, isAdmin:false, joinCode, createdAt:new Date().toISOString(), consent })),
+  /* RODO: access / portability (art. 15, 20) and erasure (art. 17) */
+  exportMyData: uid => wrap(async () => {
+    const [p, l, r] = await Promise.all([db.doc("users/" + uid).get(), db.collection("logs").where("user_id", "==", uid).get(), db.doc("ranking/" + uid).get()]);
+    const profile = p.exists ? { ...p.data() } : null; if (profile) delete profile.joinCode;
+    return { exportedAt:new Date().toISOString(), app:"Hubzone Weightlifting e-Dziennik", account:{ uid, email: auth.currentUser && auth.currentUser.email },
+      profile, trainingLogs:list(l), ranking: r.exists ? r.data() : null };
+  }),
+  deleteMyAccount: (uid, password) => wrap(async () => {
+    const u = auth.currentUser; if (!u || u.uid !== uid) throw { code:"auth/no-current-user" };
+    await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
+    await delWhere("user_id", uid);
+    await db.doc("ranking/" + uid).delete().catch(() => {});
+    await db.doc("users/" + uid).delete();
+    await u.delete();
+  }),
+  deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
   updateProfile: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
   users: () => wrap(async () => (await db.collection("users").get()).docs.map(d => asProfile(d.id, d.data()))),
@@ -42,11 +73,11 @@ HZ.api = {
   saveRanking: (uid, row) => wrap(() => db.doc("ranking/" + uid).set(row)),
   deleteRanking: uid => wrap(() => db.doc("ranking/" + uid).delete()),
   /* clients without an account (no phone): created and filled in by the trainer */
-  addManualClient: name => wrap(async () => { const id = "m_" + HZ.uuid().replace(/-/g, "").slice(0, 20);
-    const doc = { name, email:"", isAdmin:false, manual:true, createdAt:new Date().toISOString() };
+  addManualClient: (name, consent) => wrap(async () => { const id = "m_" + HZ.uuid().replace(/-/g, "").slice(0, 20);
+    const doc = { name, email:"", isAdmin:false, manual:true, createdAt:new Date().toISOString(), consent };
     await db.doc("users/" + id).set(doc); return asProfile(id, doc); }),
   renameManualClient: (id, name) => wrap(() => db.doc("users/" + id).update({ name })),
-  deleteManualClient: id => wrap(async () => { await db.doc("ranking/" + id).delete().catch(() => {}); await db.doc("users/" + id).delete(); }),
+  deleteManualClient: id => wrap(async () => { await delWhere("user_id", id); await db.doc("ranking/" + id).delete().catch(() => {}); await db.doc("users/" + id).delete(); }),
   getClub: () => wrap(async () => { const s = await db.doc("settings/club").get(); return s.exists ? (s.data().joinCode || null) : null; }),
   setClub: code => wrap(() => db.doc("settings/club").set({ joinCode:code })),
   saveWorkout: row => wrap(async () => { const { id, ...body } = row; await db.doc("workouts/" + id).set(body); return row; }),
@@ -475,12 +506,12 @@ HZ.lineChart = (pts, { ticks, fmt }) => {
   const x = i => pts.length === 1 ? (L + (W - R)) / 2 : L + i * (W - L - R) / (pts.length - 1);
   const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
   const tickVals = ticks || (() => { const step = niceStep((hi - lo) / 4); const o = []; for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) o.push({ v, t:fmt(v) }); return o; })();
-  const font = { "font-size":11, fill:"var(--muted)", "font-family":"IBM Plex Sans, system-ui, sans-serif" };
+  const font = { "font-size":11, fill:"var(--muted)", "font-family":"system-ui, sans-serif" };
   const svg = sv("svg", { class:"chart", viewBox:`0 0 ${W} ${H}`, role:"img", "aria-label":"Wykres postępu" },
     tickVals.map(t => sv("g", {}, sv("line", { x1:L, x2:W-R, y1:y(t.v), y2:y(t.v), stroke:"var(--line)", "stroke-width":1 }), sv("text", { x:L-6, y:y(t.v)+4, "text-anchor":"end", ...font }, t.t))),
     pts.length > 1 ? sv("path", { d:`M${x(0)},${H-B} ` + pts.map((p,i) => `L${x(i)},${y(p.y)}`).join(" ") + ` L${x(pts.length-1)},${H-B} Z`, fill:"var(--accent)", "fill-opacity":0.1, stroke:"none" }) : null,
     pts.length > 1 ? sv("path", { d:pts.map((p,i) => `${i ? "L" : "M"}${x(i)},${y(p.y)}`).join(" "), fill:"none", stroke:"var(--accent)", "stroke-width":2, "stroke-linejoin":"round" }) : null,
-    !ticks && pts.length <= 10 ? pts.map((p,i) => sv("text", { x:x(i), y:y(p.y) - 9, "text-anchor": i === 0 && pts.length > 1 ? "start" : i === pts.length - 1 && pts.length > 1 ? "end" : "middle", "font-size":11, "font-weight":600, fill:"var(--ink)", "font-family":"IBM Plex Sans, system-ui, sans-serif" }, fmt(p.y))) : null,
+    !ticks && pts.length <= 10 ? pts.map((p,i) => sv("text", { x:x(i), y:y(p.y) - 9, "text-anchor": i === 0 && pts.length > 1 ? "start" : i === pts.length - 1 && pts.length > 1 ? "end" : "middle", "font-size":11, "font-weight":600, fill:"var(--ink)", "font-family":"system-ui, sans-serif" }, fmt(p.y))) : null,
     pts.map((p,i) => sv("circle", { cx:x(i), cy:y(p.y), r: i === pts.length-1 ? 5 : 3.5, fill: i === pts.length-1 ? "var(--accent)" : "var(--surface)", stroke:"var(--accent)", "stroke-width":2 })),
     sv("text", { x:L, y:H-6, ...font }, HZ.fmtDate(pts[0].x)),
     pts.length > 1 ? sv("text", { x:W-R, y:H-6, "text-anchor":"end", ...font }, HZ.fmtDate(pts[pts.length-1].x)) : null);
@@ -641,7 +672,8 @@ function authMsg(err){
   const c = (err && err.code) || "";
   if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return "Nieprawidłowy e-mail lub hasło.";
   if (c === "auth/email-already-in-use") return "To konto już istnieje. Zaloguj się.";
-  if (c === "auth/weak-password") return "Hasło musi mieć co najmniej 6 znaków.";
+  if (c === "auth/weak-password" || c === "auth/password-does-not-meet-requirements") return `Hasło jest za słabe: min. ${HZ.MIN_PASSWORD} znaków, litera i cyfra.`;
+  if (c === "auth/requires-recent-login") return "Ze względów bezpieczeństwa zaloguj się ponownie i powtórz operację.";
   if (c === "auth/invalid-email") return "Wpisz poprawny adres e-mail.";
   if (c === "auth/too-many-requests") return "Za dużo prób. Odczekaj chwilę i spróbuj ponownie.";
   if (c === "auth/network-request-failed") return "Brak połączenia z internetem.";
@@ -650,6 +682,18 @@ function authMsg(err){
   return "Coś poszło nie tak. Spróbuj ponownie.";
 }
 HZ.authMsg = authMsg;
+/* password policy for new passwords */
+const COMMON = ["password","haslo","hasło","qwerty","12345678","123456789","1234567890","11111111","zaq12wsx","polska","iloveyou","admin123","password1","qwerty123","abc12345","hubzone","trening1"];
+HZ.passwordProblem = (pass, email) => {
+  if (pass.length < HZ.MIN_PASSWORD) return `Hasło musi mieć co najmniej ${HZ.MIN_PASSWORD} znaków.`;
+  if (!/[A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ]/.test(pass) || !/\d/.test(pass)) return "Hasło musi zawierać literę i cyfrę.";
+  const low = pass.toLowerCase(); const local = (email || "").split("@")[0].toLowerCase();
+  if (COMMON.some(w => low.includes(w)) || (local.length >= 4 && low.includes(local))) return "To hasło jest zbyt łatwe do odgadnięcia. Wybierz inne.";
+  return null;
+};
+HZ.policyUrl = "polityka-prywatnosci.html";
+HZ.policyLink = (text = "Polityka prywatności") => el("a", { href:HZ.policyUrl, target:"_blank", rel:"noopener", text });
+HZ.footer = () => el("footer", { class:"foot small muted" }, HZ.policyLink(), el("span", { text:" · Hubzone Weightlifting e-Dziennik" }));
 HZ.registering = null;
 /* mode: "login" | "register" | "forgot"; allowRegister=false on admin page */
 HZ.authView = ({ mode, allowRegister, onMode, title, sub }) => {
@@ -659,25 +703,35 @@ HZ.authView = ({ mode, allowRegister, onMode, title, sub }) => {
   const heading = { login:"Zaloguj się", register:"Załóż konto", forgot:"Nie pamiętasz hasła?" }[mode];
   form.append(el("div", { class:"stack", style:"gap:4px" }, el("h2", { text: title || heading }), sub ? el("p", { class:"small muted", text:sub }) : null));
   const emailIn = el("input", { id:"au-email", type:"email", autocomplete:"email", required:true, value:HZ.LS.get("hz-email") || "" });
-  const passIn = el("input", { id:"au-pass", type:"password", autocomplete: mode === "login" ? "current-password" : "new-password", minlength:"6", required:true });
+  const passIn = el("input", { id:"au-pass", type:"password", autocomplete: mode === "login" ? "current-password" : "new-password", minlength: mode === "register" ? String(HZ.MIN_PASSWORD) : "6", required:true });
+  const ageIn = el("input", { id:"au-age", type:"checkbox", style:"width:auto;margin-top:3px" });
+  const rankIn = el("input", { id:"au-rank", type:"checkbox", style:"width:auto;margin-top:3px" });
   const nameIn = el("input", { id:"au-name", autocomplete:"given-name", maxlength:"60", placeholder:"np. Kasia" });
   const codeIn = el("input", { id:"au-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase" });
   if (mode === "register") form.append(el("label", { class:"f" }, "Imię", nameIn));
   form.append(el("label", { class:"f" }, "E-mail", emailIn));
-  if (mode !== "forgot") form.append(el("label", { class:"f" }, "Hasło (min. 6 znaków)", passIn));
-  if (mode === "register") form.append(el("label", { class:"f" }, "Kod klubu", codeIn));
+  if (mode !== "forgot") form.append(el("label", { class:"f" }, mode === "register" ? `Hasło (min. ${HZ.MIN_PASSWORD} znaków, litera i cyfra)` : "Hasło", passIn));
+  if (mode === "register"){
+    form.append(el("label", { class:"f" }, "Kod klubu", codeIn),
+      el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, ageIn,
+        el("span", {}, "Mam ukończone 16 lat i zapoznałem/-am się z ", HZ.policyLink("polityką prywatności"), ". (wymagane)")),
+      el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rankIn,
+        el("span", { text:"Chcę być widoczny/-a w rankingu grupy (imię i wyniki). Mogę to zmienić w każdej chwili w zakładce Konto. (dobrowolne)" })));
+  }
   const submit = el("button", { type:"submit", class:"primary", text:{ login:"Zaloguj", register:"Załóż konto", forgot:"Wyślij link" }[mode] });
   form.append(msg, info, submit);
   const links = el("div", { class:"row between small" });
   if (mode === "login"){ if (allowRegister) links.append(el("button", { type:"button", class:"link", onclick(){ onMode("register"); }, text:"Nie masz konta? Załóż je" }));
     links.append(el("button", { type:"button", class:"link", onclick(){ onMode("forgot"); }, text:"Nie pamiętam hasła" })); }
   else links.append(el("button", { type:"button", class:"link", onclick(){ onMode("login"); }, text:"Wróć do logowania" }));
-  form.append(links);
+  form.append(links); if (mode !== "register") form.append(el("p", { class:"small muted" }, HZ.policyLink()));
   form.addEventListener("submit", async ev => {
     ev.preventDefault(); msg.textContent = ""; info.hidden = true;
     const email = emailIn.value.trim().toLowerCase(), pass = passIn.value;
     if (!/^\S+@\S+\.\S+$/.test(email)){ msg.textContent = "Wpisz poprawny adres e-mail."; return; }
-    if (mode !== "forgot" && pass.length < 6){ msg.textContent = "Hasło musi mieć co najmniej 6 znaków."; return; }
+    if (mode === "login" && !pass){ msg.textContent = "Wpisz hasło."; return; }
+    if (mode === "register"){ const pp = HZ.passwordProblem(pass, email); if (pp){ msg.textContent = pp; return; } }
+    if (mode === "register" && !ageIn.checked){ msg.textContent = "Zaznacz, że masz ukończone 16 lat i znasz politykę prywatności."; return; }
     if (mode === "register" && !nameIn.value.trim()){ msg.textContent = "Wpisz imię."; return; }
     if (mode === "register" && !codeIn.value.trim()){ msg.textContent = "Wpisz kod klubu."; return; }
     HZ.LS.set("hz-email", email); submit.disabled = true;
@@ -687,7 +741,9 @@ HZ.authView = ({ mode, allowRegister, onMode, title, sub }) => {
         const name = nameIn.value.trim().slice(0, 60), joinCode = codeIn.value.trim().toUpperCase();
         HZ.registering = (async () => {
           const cred = await auth.createUserWithEmailAndPassword(email, pass);
-          const r = await HZ.api.createProfile(cred.user.uid, { name, email, joinCode });
+          const consent = HZ.makeConsent(null, { age16:true, ranking:rankIn.checked, health:false });
+          const r = await HZ.api.createProfile(cred.user.uid, { name, email, joinCode, consent });
+          if (!r.error) cred.user.sendEmailVerification().catch(() => {});
           if (r.error){
             await cred.user.delete().catch(() => auth.signOut());
             const e = new Error("profile"); e.code = r.error.code === "permission-denied" ? "hz/join-code" : r.error.code; throw e;

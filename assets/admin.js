@@ -8,6 +8,11 @@ const A = { session:null, profile:null, checked:false, authMode:"login", tab:HZ.
 
 function render(){ HZ.swap(app, view()); }
 
+/* security: the trainer panel signs out after 30 min without activity */
+const IDLE_MS = 30 * 60 * 1000; let idleTimer = null;
+function armIdle(){ clearTimeout(idleTimer); if (A.session) idleTimer = setTimeout(async () => { await HZ.api.signOut(); toast("Wylogowano po 30 min bezczynności."); }, IDLE_MS); }
+["pointerdown","keydown","scroll","visibilitychange"].forEach(ev => document.addEventListener(ev, armIdle, { passive:true }));
+
 async function loadAll(){
   try {
     const pr = await HZ.api.profile(A.session.user.id);
@@ -42,7 +47,7 @@ function view(){
     el("div", { class:"row" }, el("button", { onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }), el("a", { href:"./", class:"small", text:"Przejdź do panelu klienta" })))];
   const warn = !A.joinCode ? el("div", { class:"notice" }, "Kod klubu nie jest ustawiony, więc konto może założyć każdy, kto zna link. ",
     el("button", { class:"link", onclick(){ A.tab = "settings"; HZ.LS.set("hz-admin-tab", "settings"); render(); }, text:"Ustaw kod" })) : null;
-  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body()];
+  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body(), HZ.footer()];
 }
 function header(){
   return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
@@ -57,8 +62,10 @@ function body(){
   if (A.tab === "ranking"){
     if (!A.rankRows){ HZ.api.ranking().then(async r => {
         const rows = r.data || []; const admins = new Set((A.admins || []).map(x => x.id));
-        for (const x of rows.filter(x => admins.has(x.id))) await HZ.api.deleteRanking(x.id);   // trainers are not ranked
-        A.rankRows = rows.filter(x => !admins.has(x.id)); if (r.error) toast(HZ.dbError(r.error)); render(); });
+        const consent = new Set(A.clients.filter(c => c.consent && c.consent.ranking).map(c => c.id));
+        const drop = rows.filter(x => admins.has(x.id) || !consent.has(x.id));   // trainers and people without consent are not ranked
+        for (const x of drop) await HZ.api.deleteRanking(x.id);
+        A.rankRows = rows.filter(x => !drop.includes(x)); if (r.error) toast(HZ.dbError(r.error)); render(); });
       return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
     return [...HZ.rankingView(A.rankRows, null, render, { showHidden:true }),
       el("div", { class:"row" }, el("button", { onclick(){ A.rankRows = null; render(); }, text:"Odśwież" }),
@@ -135,7 +142,7 @@ function settingsView(){
     el("p", { class:"small muted", text:"Nowy klient wpisuje ten kod przy zakładaniu konta. Dzięki temu konta nie założy nikt spoza grupy. Zmień kod, jeśli wycieknie; istniejących kont to nie dotyczy." }),
     el("label", { class:"f" }, "Aktualny kod", codeIn),
     el("button", { async onclick(){ const v = codeIn.value.trim().toUpperCase();
-      if (v.length < 3){ toast("Kod musi mieć co najmniej 3 znaki."); return; }
+      if (v.length < 6){ toast("Kod musi mieć co najmniej 6 znaków (np. litery i cyfry), żeby trudno go było zgadnąć."); return; }
       const { error } = await HZ.api.setClub(v);
       if (error){ toast(HZ.dbError(error)); return; } A.joinCode = v; toast("Zapisano kod klubu"); render(); }, text:"Zapisz kod" }));
   const ownCard = el("div", { class:"card" }, el("h2", { text:"Trening własny" }),
@@ -289,7 +296,7 @@ function exportCsv(wid, rows){
   const lines = [["data","trening","klient","cwiczenie","cel","typ","seria","obciazenie","powtorzenia","RIR","zmeczenie"].join(";")];
   for (const { client, log } of rows) for (const e of (log.entries || [])){ let wi = 0, ri = 0; e.sets.forEach(s => lines.push([log.date, "#" + HZ.workoutNo(wid), client.name, e.exName, `${e.targetSets}x${e.targetReps}`, s.warmup ? "wstepna" : "robocza", s.warmup ? ++wi : ++ri,
     e.type === "band" ? HZ.bandName(s.load) : (s.load == null ? "" : String(s.load).replace(".", ",")), s.reps, s.rir ?? "", log.fatigue ?? ""]
-    .map(v => `"${String(v).replace(/"/g, '""')}"`).join(";"))); }
+    .map(v => { let t = String(v); if (/^[=+\-@\t\r]/.test(t)) t = "'" + t; return `"${t.replace(/"/g, '""')}"`; }).join(";"))); }   // no spreadsheet formula injection
   const blob = new Blob(["﻿" + lines.join("\n")], { type:"text/csv;charset=utf-8" });
   const a = el("a", { href:URL.createObjectURL(blob), download:`hubzone-wyniki-${w ? w.date : "trening"}.csv` });
   document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -359,12 +366,25 @@ async function saveEntry(btn){
   const { data, error } = await HZ.api.saveWorkoutLog(row);
   if (error){ toast(HZ.dbError(error)); btn.disabled = false; return; }
   const all = logs.filter(l => l.id !== data.id).concat(data);
-  if (S.config.rankingEnabled !== false){
-    const rk = await HZ.api.saveRanking(client.id, { name:client.name, ...HZ.rankRow(HZ.computeStats(all), client.bodyweight), hidden:false, updatedAt:new Date().toISOString() });
-    if (rk.error) toast("Wyniki zapisane, ale ranking się nie zaktualizował: opublikuj nowe reguły w Firebase.");
-  }
+  if (S.config.rankingEnabled !== false) await syncManualRanking(client, all);
   A.entry = null; A.rankRows = null; toast(`Zapisano wyniki: ${client.name}`);
   await loadClients().catch(() => {}); loadResults(w.id);
+}
+
+/* ranking row of a client without an account: only with the consent the trainer recorded */
+async function syncManualRanking(c, logs){
+  const cs = c.consent || {};
+  if (!cs.ranking){ await HZ.api.deleteRanking(c.id); return; }
+  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankRow(HZ.computeStats(logs || []), cs.health ? c.bodyweight : null), hidden:false, updatedAt:new Date().toISOString() });
+  if (rk.error) toast("Ranking się nie zaktualizował: opublikuj nowe reguły w Firebase.");
+}
+async function setManualConsent(c, patch, extra = {}){
+  const consent = HZ.makeConsent(c.consent, { ...patch, by:"trener" });
+  const { error } = await HZ.api.updateProfile(c.id, { consent, ...extra });
+  if (error){ toast(error.code === "permission-denied" ? "Opublikuj nowe reguły w Firebase (Firestore → Rules)." : HZ.dbError(error)); return false; }
+  c.consent = consent; Object.assign(c, extra.bodyweight !== undefined ? { bodyweight:extra.bodyweight } : {});
+  const logs = A.clientId === c.id && A.clientLogs ? A.clientLogs : ((await HZ.api.logsOf(c.id)).data || []);
+  await syncManualRanking(c, logs); A.rankRows = null; return true;
 }
 
 /* ---------- clients ---------- */
@@ -377,32 +397,48 @@ async function openClient(id){
 function clientsView(){
   if (A.clientId){
     const c = A.clients.find(x => x.id === A.clientId) || { name:"Klient" };
-    const manualBar = c.manual ? el("div", { class:"row" },
-      el("span", { class:"chip", text:"bez konta · wyniki wpisujesz Ty" }),
+    const cs = c.consent || {};
+    const delBar = el("div", { class:"row" },
+      c.manual ? el("span", { class:"chip", text:"bez konta · wyniki wpisujesz Ty" }) : null,
       A.confirmDelClient === c.id
-        ? el("span", { class:"row" }, el("span", { class:"small", text:"Usunąć klienta z listy i rankingu?" }),
-            el("button", { class:"danger", async onclick(){ const { error } = await HZ.api.deleteManualClient(c.id); if (error){ toast(HZ.dbError(error)); return; }
-              A.clients = A.clients.filter(x => x.id !== c.id); A.clientId = null; A.confirmDelClient = null; A.rankRows = null; toast("Usunięto"); render(); }, text:"Usuń" }),
-            el("button", { onclick(){ A.confirmDelClient = null; render(); }, text:"Anuluj" }))
-        : el("button", { class:"ghost", onclick(){ A.confirmDelClient = c.id; render(); }, text:"Usuń klienta" })) : null;
+        ? el("span", { class:"stack", style:"gap:6px" }, el("span", { class:"small", text: c.manual ? "Usunąć klienta i wszystkie jego wyniki na stałe?" : "Usunąć profil, wszystkie wyniki i wpis w rankingu tego klienta? Jego konto logowania zostanie (usuniesz je w Firebase → Authentication). Tego nie da się cofnąć." }),
+            el("span", { class:"row" },
+              el("button", { class:"danger", async onclick(ev){ ev.currentTarget.disabled = true; const { error } = await HZ.api.deleteClientData(c.id); if (error){ toast(HZ.dbError(error)); ev.currentTarget.disabled = false; return; }
+                A.clients = A.clients.filter(x => x.id !== c.id); A.clientId = null; A.confirmDelClient = null; A.rankRows = null; toast("Usunięto dane klienta"); render(); }, text:"Usuń na stałe" }),
+              el("button", { onclick(){ A.confirmDelClient = null; render(); }, text:"Anuluj" })))
+        : el("button", { class:"ghost", onclick(){ A.confirmDelClient = c.id; render(); }, text: c.manual ? "Usuń klienta" : "Usuń dane klienta (RODO)" }));
+    const consentBar = el("p", { class:"small muted", text: c.manual
+        ? `Zgody (zebrane przez Ciebie): ranking ${cs.ranking ? "tak" : "nie"}, masa ciała ${cs.health ? "tak" : "nie"}.`
+        : `Zgody klienta: polityka ${HZ.consentOk(c) ? "zaakceptowana" : "jeszcze nie"}, ranking ${cs.ranking ? "tak" : "nie"}, masa ciała ${cs.health ? "tak" : "nie"}.` });
     const bwIn = el("input", { id:"cl-bw", inputmode:"decimal", placeholder:"kg", value: c.bodyweight ? HZ.fmtKg(c.bodyweight) : "", style:"max-width:6rem;text-align:center" });
-    const bwBar = c.manual ? el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn,
-        el("button", { async onclick(){ const v = HZ.parseNum(bwIn.value); if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg."); return; }
-          const bw = v == null ? null : Math.round(v * 10) / 10; const { error } = await HZ.api.updateProfile(c.id, { bodyweight:bw });
-          if (error){ toast(error.code === "permission-denied" ? "Opublikuj nowe reguły w Firebase (Firestore → Rules)." : HZ.dbError(error)); return; }
-          c.bodyweight = bw;
-          if (A.clientLogs && A.clientLogs.length) await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankRow(HZ.computeStats(A.clientLogs), bw), hidden:false, updatedAt:new Date().toISOString() });
-          A.rankRows = null; toast("Zapisano masę ciała"); render(); }, text:"Zapisz" }))
-      : el("p", { class:"small muted", text: c.bodyweight ? `Masa ciała: ${HZ.fmtKg(c.bodyweight)} kg` : "Masa ciała: nie wpisana (klient wpisuje ją w Konto)" });
-    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), manualBar, bwBar,
+    const hcIn = el("input", { id:"cl-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: cs.health || null });
+    const rkIn = el("input", { id:"cl-rank", type:"checkbox", style:"width:auto;margin-top:3px", checked: cs.ranking || null,
+      async onchange(ev){ if (await setManualConsent(c, { ranking:ev.target.checked })) { toast(ev.target.checked ? "Klient w rankingu" : "Usunięto z rankingu"); render(); } } });
+    const bwBar = c.manual ? el("div", { class:"card" }, el("h3", { text:"Zgody i masa ciała" }),
+        el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rkIn, el("span", { text:"Klient zgodził się na udział w rankingu grupy." })),
+        el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hcIn, el("span", { text:"Klient wyraził wyraźną zgodę na przetwarzanie masy ciała (dane o zdrowiu) do rankingu siły względnej." })),
+        el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn,
+          el("button", { async onclick(){ const v = HZ.parseNum(bwIn.value); if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg."); return; }
+            if (v != null && !hcIn.checked){ toast("Zaznacz, że klient zgodził się na przetwarzanie masy ciała."); return; }
+            const bw = v == null || !hcIn.checked ? null : Math.round(v * 10) / 10;
+            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })))
+      : el("p", { class:"small muted", text: c.bodyweight ? `Masa ciała: ${HZ.fmtKg(c.bodyweight)} kg` : "Masa ciała: nie wpisana (klient wpisuje ją w Konto, za zgodą)" });
+    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), delBar, consentBar, bwBar,
       ...(A.clientLogs ? [A.clientLogs.length ? HZ.personalStats(A.clientLogs, `Statystyki: ${c.name || "klient"}`) : null, ...HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render)] : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
   }
   const nameIn = el("input", { id:"manual-name", maxlength:"60", placeholder:"Imię (i nazwisko)" });
+  const infIn = el("input", { id:"manual-inf", type:"checkbox", style:"width:auto;margin-top:3px" });
+  const rkIn = el("input", { id:"manual-rank", type:"checkbox", style:"width:auto;margin-top:3px" });
   const addCard = el("div", { class:"card" }, el("h3", { text:"Dodaj klienta bez konta" }),
     el("p", { class:"small muted", text:"Dla osób bez telefonu. Wyniki wpisujesz za nich w zakładce Wyniki (przycisk „Wpisz wyniki”). Pojawiają się w rankingu i statystykach jak wszyscy." }),
+    el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, infIn,
+      el("span", {}, "Klient ma ukończone 16 lat i został poinformowany o przetwarzaniu danych (", HZ.policyLink("polityka prywatności"), "). (wymagane)")),
+    el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rkIn,
+      el("span", { text:"Klient zgodził się na udział w rankingu grupy. (dobrowolne)" })),
     el("div", { class:"row", style:"flex-wrap:nowrap" }, nameIn,
       el("button", { class:"primary", style:"white-space:nowrap", async onclick(ev){ const n = nameIn.value.trim().slice(0, 60); if (!n){ toast("Wpisz imię."); return; }
-        ev.currentTarget.disabled = true; const { data, error } = await HZ.api.addManualClient(n);
+        if (!infIn.checked){ toast("Zaznacz, że klient został poinformowany o przetwarzaniu danych."); return; }
+        ev.currentTarget.disabled = true; const { data, error } = await HZ.api.addManualClient(n, HZ.makeConsent(null, { age16:true, ranking:rkIn.checked, by:"trener" }));
         if (error){ toast(error.code === "permission-denied" ? "Firebase odrzucił zapis: wklej aktualny plik firestore.rules w Firestore → Rules i kliknij Publish." : HZ.dbError(error)); render(); return; }
         A.clients.push(data); A.clients.sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl")); toast(`Dodano: ${n}`); render(); }, text:"Dodaj" })));
   if (!A.clients.length) return [addCard, el("div", { class:"empty" }, el("h3", { text:"Brak klientów" }), el("p", { class:"small", text:"Klienci pojawią się tu po założeniu konta na stronie głównej z kodem klubu albo gdy dodasz ich powyżej." }))];
@@ -422,7 +458,7 @@ if (!HZ.ready){ render(); return; }
 render();
 HZ.api.onAuth(session => {
   const was = A.session && A.session.user.id;
-  A.session = session;
+  A.session = session; armIdle();
   if (!session){ A.checked = false; A.profile = null; render(); return; }
   if (was !== session.user.id){ A.checked = false; render(); setTimeout(loadAll, 0); }
 });

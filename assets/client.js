@@ -22,7 +22,7 @@ async function loadAll(){
       if (lg.error) throw lg.error;
       C.logs = lg.data.sort((a,b) => (a.date||"").localeCompare(b.date||""));
       const mr = await HZ.api.myRanking(uid);
-      if (mr.data){ C.rankHidden = mr.data.hidden === true; const { updatedAt, ...rest } = mr.data; C.rankKey = JSON.stringify(rest); }
+      if (mr.data){ const { updatedAt, ...rest } = mr.data; C.rankKey = JSON.stringify(rest); } else C.rankKey = "none";
       setTimeout(syncRanking, 0);
     }
     C.error = null;
@@ -38,7 +38,8 @@ function view(){
   if (!C.loaded) return [header(), el("div", { class:"empty", text:"Wczytuję Twój dziennik…" })];
   if (C.error) return [header(), el("div", { class:"empty" }, el("p", { text:C.error }), el("button", { onclick(){ C.loaded = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
   if (!C.profile) return [header(), joinCard()];
-  return [header(), HZ.tabBar([["today","Dzisiejszy trening"],["progress","Postępy"], S.config.rankingEnabled ? ["ranking","Ranking"] : null, S.config.ownEnabled ? ["own","Trening własny"] : null, ["account","Konto"]].filter(Boolean), C.tab, k => { C.tab = k; render(); }), ...body()];
+  if (!C.profile.is_admin && !HZ.consentOk(C.profile)) return [header(), consentGate(), HZ.footer()];
+  return [header(), HZ.tabBar([["today","Dzisiejszy trening"],["progress","Postępy"], S.config.rankingEnabled ? ["ranking","Ranking"] : null, S.config.ownEnabled ? ["own","Trening własny"] : null, ["account","Konto"]].filter(Boolean), C.tab, k => { C.tab = k; render(); }), ...body(), HZ.footer()];
 }
 function header(){
   const wid = currentId(); const w = S.workouts.find(x => x.id === wid);
@@ -65,7 +66,9 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 async function syncRanking(){
   if (!S.config.rankingEnabled || !C.profile || !C.session) return;
   if (C.profile.is_admin){ if (C.rankKey !== "admin"){ C.rankKey = "admin"; await HZ.api.deleteRanking(C.session.user.id); } return; }   // trainers are not ranked
-  const row = { name:C.profile.name || "", ...HZ.rankRow(HZ.computeStats(C.logs), C.profile.bodyweight), hidden: !!C.rankHidden };
+  const c = C.profile.consent || {};
+  if (!c.ranking){ if (C.rankKey !== "none"){ C.rankKey = "none"; await HZ.api.deleteRanking(C.session.user.id); if (C.rankRows) loadRanking(); } return; }   // ranking only with consent
+  const row = { name:C.profile.name || "", ...HZ.rankRow(HZ.computeStats(C.logs), c.health ? C.profile.bodyweight : null), hidden:false };
   const key = JSON.stringify(row); if (key === C.rankKey) return;
   const { error } = await HZ.api.saveRanking(C.session.user.id, { ...row, updatedAt:new Date().toISOString() });
   if (!error){ C.rankKey = key; if (C.rankRows) loadRanking(); }
@@ -254,14 +257,47 @@ function ownView(){
   return out;
 }
 
+/* ---------- RODO: consent ---------- */
+async function saveConsent(patch, okMsg){
+  const consent = HZ.makeConsent(C.profile.consent, patch);
+  const update = { consent }; if (patch.health === false) update.bodyweight = null;
+  const { error } = await HZ.api.updateProfile(C.session.user.id, update);
+  if (error){ toast(error.code === "permission-denied" ? "Nie udało się zapisać: trener musi zaktualizować reguły bazy." : HZ.dbError(error)); return false; }
+  C.profile.consent = consent; if (patch.health === false) C.profile.bodyweight = null;
+  await syncRanking(); if (okMsg) toast(okMsg); render(); return true;
+}
+function consentGate(){
+  const c = C.profile.consent || {};
+  const age = el("input", { id:"cg-age", type:"checkbox", style:"width:auto;margin-top:3px" });
+  const rank = el("input", { id:"cg-rank", type:"checkbox", style:"width:auto;margin-top:3px", checked: c.ranking || null });
+  return el("div", { class:"card auth" }, el("h2", { text:"Twoje dane i prywatność" }),
+    el("p", { class:"small", text:"Zanim zaczniesz: aplikacja przechowuje Twoje imię, e-mail i wyniki treningowe, żeby trener mógł prowadzić Twoje treningi. Szczegóły, Twoje prawa i kontakt do administratora są w polityce prywatności." }),
+    el("p", { class:"small" }, HZ.policyLink("Przeczytaj politykę prywatności")),
+    el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, age,
+      el("span", { text:"Mam ukończone 16 lat i zapoznałem/-am się z polityką prywatności. (wymagane)" })),
+    el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rank,
+      el("span", { text:"Chcę być widoczny/-a w rankingu grupy (imię i wyniki). (dobrowolne, można zmienić w Konto)" })),
+    el("button", { class:"primary", async onclick(ev){ if (!age.checked){ toast("Zaznacz pierwsze pole, żeby korzystać z aplikacji."); return; }
+      ev.currentTarget.disabled = true; const ok = await saveConsent({ age16:true, ranking:rank.checked }, "Zapisano. Dziękujemy!"); if (!ok) ev.currentTarget.disabled = false; }, text:"Akceptuję i przechodzę dalej" }),
+    el("button", { class:"ghost", onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }));
+}
+
 /* ---------- account ---------- */
 function bwForm(hint){
   const inp = el("input", { id:"acc-bw", inputmode:"decimal", placeholder:"np. 78,5", value: C.profile && C.profile.bodyweight ? HZ.fmtKg(C.profile.bodyweight) : "", style:"max-width:7rem;text-align:center" });
+  const hasHealth = !!(C.profile.consent && C.profile.consent.health);
+  const hc = el("input", { id:"acc-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: hasHealth || null });
   return el("div", { class:"stack", style:"gap:6px" }, hint ? el("p", { class:"small", text:hint }) : null,
+    el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hc,
+      el("span", { text:"Wyrażam wyraźną zgodę na przetwarzanie mojej masy ciała (dane dotyczące zdrowia, art. 9 RODO) wyłącznie w celu obliczenia siły względnej w rankingu. Zgodę mogę wycofać w każdej chwili." })),
     el("div", { class:"row", style:"flex-wrap:nowrap" }, el("label", { class:"f", style:"flex:1" }, "Masa ciała (kg)", inp),
       el("button", { style:"align-self:flex-end", async onclick(ev){ const v = HZ.parseNum(inp.value);
         if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg, np. 78,5."); return; }
-        ev.currentTarget.disabled = true; const { error } = await HZ.api.updateProfile(C.session.user.id, { bodyweight: v == null ? null : Math.round(v * 10) / 10 });
+        if (v != null && !hc.checked){ toast("Zaznacz zgodę na przetwarzanie masy ciała, żeby ją zapisać."); return; }
+        ev.currentTarget.disabled = true;
+        const consent = HZ.makeConsent(C.profile.consent, { health: v != null });
+        const { error } = await HZ.api.updateProfile(C.session.user.id, { bodyweight: v == null ? null : Math.round(v * 10) / 10, consent });
+        if (!error) C.profile.consent = consent;
         ev.currentTarget.disabled = false;
         if (error){ toast(error.code === "permission-denied" ? "Nie udało się zapisać: trener musi zaktualizować reguły bazy." : HZ.dbError(error)); return; }
         C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
@@ -270,20 +306,46 @@ function accountView(){
   const nameIn = el("input", { id:"acc-name", maxlength:"60", value:(C.profile && C.profile.name) || "" });
   return [el("div", { class:"card" }, el("h2", { text:"Twoje konto" }),
       el("p", { class:"small muted", text:C.session.user.email }),
-      bwForm("Masa ciała służy tylko do rankingu siły względnej (% masy ciała). Widzisz ją Ty i trener, inni tylko procenty."),
       S.config.rankingEnabled ? el("label", { class:"row", style:"flex-wrap:nowrap;cursor:pointer" },
-        el("input", { id:"rank-show", type:"checkbox", style:"width:auto", checked: !C.rankHidden || null, onchange(ev){ C.rankHidden = !ev.target.checked; syncRanking(); toast(C.rankHidden ? "Nie pokazujesz się w rankingu" : "Pokazujesz się w rankingu"); } }),
-        el("span", { text:"Pokazuj mnie w rankingu grupy" })) : null,
+        el("input", { id:"rank-show", type:"checkbox", style:"width:auto", checked: (C.profile.consent && C.profile.consent.ranking) || null,
+          onchange(ev){ const on = ev.target.checked; saveConsent({ ranking:on }, on ? "Pokazujesz się w rankingu" : "Usunięto Cię z rankingu"); } }),
+        el("span", { text:"Pokazuj mnie w rankingu grupy (imię i wyniki)" })) : null,
       el("label", { class:"f" }, "Imię widoczne dla trenera", nameIn),
       el("button", { async onclick(){ const n = nameIn.value.trim(); if (!n){ toast("Wpisz imię."); return; }
         const { error } = await HZ.api.updateName(C.session.user.id, n);
         if (error){ toast(HZ.dbError(error)); return; } C.profile.name = n; syncRanking(); toast("Zapisano imię"); render(); }, text:"Zapisz imię" })),
+    el("div", { class:"card" }, el("h3", { text:"Masa ciała (opcjonalnie)" }),
+      bwForm("Służy tylko do rankingu siły względnej (% masy ciała). Widzisz ją Ty i trener, inni tylko procenty."),
+      C.profile.consent && C.profile.consent.health ? el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ saveConsent({ health:false }, "Usunięto masę ciała i wycofano zgodę"); }, text:"Wycofaj zgodę i usuń masę ciała" }) : null),
     HZ.themeCard(render),
+    privacyCard(),
     el("div", { class:"card" }, el("h3", { text:"Zmień hasło" }), el("p", { class:"small muted", text:"Wyślemy na Twój e-mail link do ustawienia nowego hasła." }),
       el("button", { async onclick(ev){ ev.currentTarget.disabled = true; try { await HZ.resetPassword(C.session.user.email); toast("Wysłano link. Sprawdź skrzynkę."); } catch(e){ toast(HZ.authMsg(e)); } }, text:"Wyślij link do zmiany hasła" })),
     el("div", { class:"row" },
       el("button", { async onclick(){ await HZ.api.signOut(); }, text:"Wyloguj się" }),
       C.profile && C.profile.is_admin ? el("a", { href:"admin.html", class:"small", text:"Panel trenera →" }) : null)];
+}
+
+/* RODO: download my data (art. 15, 20) and delete my account (art. 17) */
+function privacyCard(){
+  const passIn = el("input", { id:"del-pass", type:"password", autocomplete:"current-password", placeholder:"Twoje hasło" });
+  return el("div", { class:"card" }, el("h3", { text:"Twoje dane (RODO)" }),
+    el("p", { class:"small muted" }, "Zgody udzielone: ", (C.profile.consent && C.profile.consent.at) ? new Date(C.profile.consent.at).toLocaleString("pl-PL") : "–", ". ", HZ.policyLink()),
+    el("button", { async onclick(ev){ ev.currentTarget.disabled = true; const { data, error } = await HZ.api.exportMyData(C.session.user.id); ev.currentTarget.disabled = false;
+      if (error){ toast(HZ.dbError(error)); return; }
+      const a = el("a", { href:URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type:"application/json" })), download:`moje-dane-hubzone-${HZ.todayISO()}.json` });
+      document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500); toast("Pobrano Twoje dane"); }, text:"Pobierz moje dane (JSON)" }),
+    C.confirmDelete ? el("div", { class:"stack", style:"gap:8px;border:1px solid var(--bad);border-radius:8px;padding:10px" },
+        el("p", { class:"small", text:"Usuniemy na stałe Twoje konto, profil, wszystkie wyniki treningowe i wpis w rankingu. Tego nie da się cofnąć. Wpisz hasło, żeby potwierdzić." }),
+        passIn,
+        el("div", { class:"row" },
+          el("button", { class:"danger", async onclick(ev){ if (!passIn.value){ toast("Wpisz hasło."); return; } ev.currentTarget.disabled = true;
+            const { error } = await HZ.api.deleteMyAccount(C.session.user.id, passIn.value);
+            if (error){ ev.currentTarget.disabled = false; toast(HZ.authMsg(error) || HZ.dbError(error)); return; }
+            try { localStorage.removeItem(draftsKey()); localStorage.removeItem(ownKey()); localStorage.removeItem("hz-email"); } catch(e){}
+            C.confirmDelete = false; toast("Konto i dane zostały usunięte."); }, text:"Usuń konto na stałe" }),
+          el("button", { onclick(){ C.confirmDelete = false; render(); }, text:"Anuluj" })))
+      : el("button", { class:"ghost danger", style:"align-self:flex-start", onclick(){ C.confirmDelete = true; render(); }, text:"Usuń konto i wszystkie dane" }));
 }
 
 /* ---------- account without profile (e.g. registration interrupted) ---------- */
@@ -293,10 +355,13 @@ function joinCard(){
   return el("div", { class:"card auth" }, el("h2", { text:"Dokończ zakładanie konta" }),
     el("p", { class:"small muted", text:`Zalogowano jako ${C.session.user.email}. Podaj imię i kod klubu od trenera.` }),
     el("label", { class:"f" }, "Imię", nameIn), el("label", { class:"f" }, "Kod klubu", codeIn),
+    el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, el("input", { id:"jn-age", type:"checkbox", style:"width:auto;margin-top:3px" }),
+      el("span", {}, "Mam ukończone 16 lat i zapoznałem/-am się z ", HZ.policyLink("polityką prywatności"), ". (wymagane)")),
     el("button", { class:"primary", async onclick(ev){ const name = nameIn.value.trim().slice(0,60), code = codeIn.value.trim().toUpperCase();
       if (!name || !code){ toast("Wpisz imię i kod klubu."); return; }
+      if (!document.getElementById("jn-age").checked){ toast("Zaznacz zgodę (16+ i polityka prywatności)."); return; }
       ev.currentTarget.disabled = true;
-      const { error } = await HZ.api.createProfile(C.session.user.id, { name, email:C.session.user.email, joinCode:code });
+      const { error } = await HZ.api.createProfile(C.session.user.id, { name, email:C.session.user.email, joinCode:code, consent:HZ.makeConsent(null, { age16:true }) });
       if (error){ toast(error.code === "permission-denied" ? "Nieprawidłowy kod klubu." : HZ.dbError(error)); render(); return; }
       C.loaded = false; render(); loadAll(); }, text:"Gotowe" }),
     el("button", { class:"ghost", onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }));

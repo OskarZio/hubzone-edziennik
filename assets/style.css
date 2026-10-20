@@ -4,8 +4,9 @@
   --bg:#ECEFF1; --surface:#FFFFFF; --sunk:#F5F7F8; --ink:#14202A; --muted:#5A6873; --line:#D3DADF;
   --accent:#D9480F; --accent-ink:#FFFFFF; --accent-soft:#FBE3D6;
   --good:#2B8A3E; --good-soft:#DDF3E2; --hold:#3B5BA9; --hold-soft:#E0E7F7; --bad:#C92A2A; --bad-soft:#F9E0E0;
-  --display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
-  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  /* system fonts only: no requests to Google Fonts, so no visitor IP is sent to third parties */
+  --display:"Avenir Next Condensed","Roboto Condensed","Arial Narrow","Helvetica Neue",system-ui,sans-serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --r:10px;
   color-scheme:light;
 }
@@ -157,5 +158,12 @@ button.thsort{background:none;border:0;padding:0;font:inherit;color:inherit;text
 .swatches button{width:40px;height:40px;border-radius:50%;padding:0;border:2px solid var(--line);position:relative}
 .swatches button[aria-pressed="true"]{border-color:var(--ink);box-shadow:0 0 0 2px var(--bg) inset}
 .swatches button[aria-pressed="true"]::after{content:"✓";position:absolute;inset:0;display:grid;place-items:center;color:#fff;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+.foot{text-align:center;padding:18px 0 4px}
+.foot a{color:var(--muted)}
+label.consent span{line-height:1.35}
 .auth{max-width:420px;width:100%;margin:6vh auto 0}
 @media (prefers-reduced-motion:no-preference){.toast{animation:pop .2s ease-out}@keyframes pop{from{opacity:0;transform:translate(-50%,8px)}}}
+.policy h1{font-size:1.9rem}
+.policy ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.policy td{white-space:normal;vertical-align:top;min-width:120px}
+.policy section p{line-height:1.5}

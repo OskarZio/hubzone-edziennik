@@ -7,3 +7,11 @@ window.HZ_FIREBASE = {
   messagingSenderId: "1033337097749",
   appId: "1:1033337097749:web:0ad9ce830a57ebf4c4c81c"
 };
+
+// Dane administratora danych (RODO) — pokazują się w polityce prywatności. Uzupełnij e-mail kontaktowy.
+window.HZ_LEGAL = {
+  controller: "Oskar Ziółkowski – Hubzone Weightlifting",
+  email: "UZUPELNIJ_EMAIL_KONTAKTOWY",
+  address: "",
+  updated: "20 października 2026"
+};

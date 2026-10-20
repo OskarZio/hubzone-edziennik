@@ -1,37 +1,62 @@
 rules_version = '2';
 // Hubzone Weightlifting e-Dziennik — reguły bezpieczeństwa Firestore.
 // Wklej całość w Firebase → Firestore Database → Rules → Publish.
+//
+// Zasady ogólne:
+//  - bez logowania nie da się odczytać ani zapisać niczego,
+//  - klient widzi i zmienia wyłącznie swoje dane,
+//  - trener (isAdmin == true, nadawane tylko ręcznie w konsoli) widzi dane klientów i zarządza treningami,
+//  - ranking zawiera tylko osoby, które wyraziły na to zgodę,
+//  - masa ciała (dane o zdrowiu) zapisuje się tylko przy wyraźnej zgodzie (consent.health == true).
 service cloud.firestore {
   match /databases/{database}/documents {
 
     function signedIn() { return request.auth != null; }
     function me() { return /databases/$(database)/documents/users/$(request.auth.uid); }
     function isMember() { return signedIn() && exists(me()); }
-    function isAdmin() { return signedIn() && get(me()).data.isAdmin == true; }
+    function isAdmin() { return signedIn() && get(me()).data.get('isAdmin', false) == true; }
     function club() { return /databases/$(database)/documents/settings/club; }
-    // client without an account, created by the trainer (no phone etc.)
-    function isManual(uid) { return get(/databases/$(database)/documents/users/$(uid)).data.manual == true; }
+    function userDoc(uid) { return get(/databases/$(database)/documents/users/$(uid)); }
+    // klient bez konta, założony przez trenera (np. bez telefonu)
+    function isManual(uid) { return userDoc(uid).data.get('manual', false) == true; }
+    function rankingConsent(uid) { return userDoc(uid).data.get('consent', {}).get('ranking', false) == true; }
 
-    // Profil: tworzy go sam klient przy rejestracji, tylko z poprawnym kodem klubu
-    // (dopóki trener nie ustawi kodu, rejestracja jest otwarta).
+    function validName(d) { return d.name is string && d.name.size() > 0 && d.name.size() <= 60; }
+    function validConsent(c) {
+      return c is map && c.keys().hasOnly(['policy', 'at', 'age16', 'ranking', 'health', 'by'])
+        && c.policy is string && c.policy.size() <= 20 && c.at is string && c.at.size() <= 30
+        && c.get('age16', false) is bool && c.get('ranking', false) is bool && c.get('health', false) is bool;
+    }
+    // masa ciała tylko z wyraźną zgodą na dane o zdrowiu
+    function validBodyweight(d) {
+      return !('bodyweight' in d) || d.bodyweight == null
+        || (d.bodyweight is number && d.bodyweight >= 25 && d.bodyweight <= 300 && d.get('consent', {}).get('health', false) == true);
+    }
+
     match /users/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
-      allow create: if (isAdmin() && request.resource.data.manual == true && request.resource.data.isAdmin == false
-          && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'manual', 'createdAt'])
-          && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60)
+      allow create: if
+          // trener zakłada klienta bez konta
+          (isAdmin() && request.resource.data.manual == true && request.resource.data.isAdmin == false
+            && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'manual', 'createdAt', 'consent'])
+            && validName(request.resource.data)
+            && (!('consent' in request.resource.data) || validConsent(request.resource.data.consent)))
+          // klient zakłada własne konto: poprawny kod klubu, zgoda 16+ i akceptacja polityki
         || (signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'joinCode', 'createdAt'])
-        && request.resource.data.isAdmin == false
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
-        && request.resource.data.email == request.auth.token.email
-        && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
-      // klient może zmienić tylko swoje imię; rolę trenera nadajesz ręcznie w konsoli Firebase
-      allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.manual == true))
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight'])
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 60
-        && (!('bodyweight' in request.resource.data) || request.resource.data.bodyweight == null
-            || (request.resource.data.bodyweight is number && request.resource.data.bodyweight >= 25 && request.resource.data.bodyweight <= 300));
-      allow delete: if isAdmin() && resource.data.manual == true;
+            && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'joinCode', 'createdAt', 'consent'])
+            && request.resource.data.isAdmin == false
+            && validName(request.resource.data)
+            && request.resource.data.email == request.auth.token.email
+            && validConsent(request.resource.data.consent) && request.resource.data.consent.age16 == true
+            && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
+      // klient: imię, masa ciała, zgody. Trener: to samo dla klientów bez konta. Rola trenera tylko ręcznie w konsoli.
+      allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('manual', false) == true))
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent'])
+        && validName(request.resource.data)
+        && (!('consent' in request.resource.data) || validConsent(request.resource.data.consent))
+        && validBodyweight(request.resource.data);
+      // prawo do usunięcia danych: klient usuwa swój profil; trener może usunąć profil klienta (nie trenera)
+      allow delete: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('isAdmin', false) != true));
     }
 
     // Kod klubu: tylko trener.
@@ -49,27 +74,36 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Ranking: każdy członek klubu widzi tabelę, ale zapisuje tylko swój wiersz.
+    // Ranking: widzą członkowie klubu; wiersz istnieje tylko za zgodą osoby (consent.ranking).
+    function validRank(d) {
+      return d.keys().hasOnly(['name', 'workouts', 'streak', 'longest', 'prs', 'progress', 'volume', 'points', 'strength', 'rel', 'bests', 'hidden', 'updatedAt'])
+        && d.name is string && d.name.size() <= 60
+        && d.points is int && d.points >= 0 && d.points <= 100000
+        && d.get('strength', 0) is number && d.get('workouts', 0) is int && d.get('streak', 0) is int && d.get('prs', 0) is int
+        && d.get('rel', {}) is map && d.get('rel', {}).size() <= 60
+        && d.get('bests', {}) is map && d.get('bests', {}).size() <= 60
+        && d.get('hidden', false) is bool;
+    }
     match /ranking/{uid} {
       allow read: if isMember();
-      allow create, update: if ((isMember() && request.auth.uid == uid) || isAdmin())
-        && request.resource.data.keys().hasOnly(['name', 'workouts', 'streak', 'longest', 'prs', 'progress', 'volume', 'points', 'strength', 'rel', 'bests', 'hidden', 'updatedAt'])
-        && request.resource.data.name is string && request.resource.data.name.size() <= 60
-        && request.resource.data.points is int && request.resource.data.points >= 0 && request.resource.data.points <= 100000
-        && request.resource.data.hidden is bool;
+      allow create, update: if validRank(request.resource.data) && rankingConsent(uid)
+        && ((isMember() && request.auth.uid == uid) || (isAdmin() && isManual(uid)));
       allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
     }
 
-    // Wpisy: klient widzi i zmienia tylko swoje, trener widzi wszystkie.
+    // Wpisy treningowe: klient widzi i zmienia tylko swoje, trener widzi wszystkie.
     function validLog() {
       let d = request.resource.data;
       return d.keys().hasOnly(['user_id', 'workout_id', 'date', 'own', 'title', 'fatigue', 'note', 'entries', 'saved_at'])
+        && d.user_id is string
+        && (d.workout_id == null || d.workout_id is string)
         && d.date is string && d.date.size() == 10
         && d.own is bool
         && (d.fatigue == null || (d.fatigue is int && d.fatigue >= 1 && d.fatigue <= 10))
         && d.note is string && d.note.size() <= 1000
         && d.title is string && d.title.size() <= 80
-        && d.entries is list && d.entries.size() <= 30;
+        && d.entries is list && d.entries.size() <= 30
+        && d.get('saved_at', '') is string;
     }
     match /logs/{id} {
       allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
@@ -78,6 +112,11 @@ service cloud.firestore {
       allow update: if validLog() && request.resource.data.user_id == resource.data.user_id
         && ((isMember() && resource.data.user_id == request.auth.uid) || (isAdmin() && isManual(resource.data.user_id)));
       allow delete: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+    }
+
+    // Wszystko inne: zablokowane.
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }
