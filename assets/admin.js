@@ -47,11 +47,12 @@ function view(){
     el("div", { class:"row" }, el("button", { onclick(){ HZ.api.signOut(); }, text:"Wyloguj się" }), el("a", { href:"./", class:"small", text:"Przejdź do panelu klienta" })))];
   const warn = !A.joinCode ? el("div", { class:"notice" }, "Kod klubu nie jest ustawiony, więc konto może założyć każdy, kto zna link. ",
     el("button", { class:"link", onclick(){ A.tab = "settings"; HZ.LS.set("hz-admin-tab", "settings"); render(); }, text:"Ustaw kod" })) : null;
+  if (A.showQr) return [qrScreen()];
   return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body(), HZ.footer()];
 }
 function header(){
   return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
-    A.session && A.profile && A.profile.is_admin ? el("div", { class:"row" }, el("a", { href:"./", class:"small", text:"Widok klienta" }), el("button", { class:"ghost", onclick(){ HZ.api.signOut(); }, text:"Wyloguj" })) : null);
+    A.session && A.profile && A.profile.is_admin ? el("div", { class:"row" }, el("button", { class:"primary", onclick(){ A.showQr = true; render(); }, text:"Kod QR" }), el("a", { href:"./", class:"small", text:"Widok klienta" }), el("button", { class:"ghost", onclick(){ HZ.api.signOut(); }, text:"Wyloguj" })) : null);
 }
 function body(){
   if (A.entry) return entryView();
@@ -163,7 +164,14 @@ function settingsView(){
         if (error){ toast(HZ.dbError(error)); ev.target.checked = !on; ev.target.disabled = false; return; }
         S.config.rankingEnabled = on; toast(on ? "Ranking włączony" : "Ranking wyłączony"); render(); } }),
       el("span", { text:"Pokaż klientom ranking i tabelę ogólną" })));
-  return [exCard, bandCard, save, codeCard, ownCard, rankCard, HZ.themeCard(render)];
+  const limIn = el("input", { id:"guest-limit", inputmode:"numeric", value:String(S.config.guestLimit || 0), style:"max-width:5rem;text-align:center" });
+  const guestCard = el("div", { class:"card" }, el("h2", { text:"Goście" }),
+    el("p", { class:"small muted", text:"Nowa osoba może wejść jako gość: tylko imię, bez e-maila. Wyniki zapisują się jak u wszystkich, a po założeniu konta zostają. Możesz wymagać konta po kilku treningach (0 = bez limitu)." }),
+    el("div", { class:"row" }, el("span", { class:"small", text:"Gość może zapisać maks.:" }), limIn, el("span", { class:"small", text:"treningów" }),
+      el("button", { async onclick(){ const n = Math.max(0, Math.min(20, parseInt(limIn.value, 10) || 0));
+        const { error } = await HZ.api.setGuestLimit(n); if (error){ toast(HZ.dbError(error)); return; }
+        S.config.guestLimit = n; toast(n ? `Gość musi założyć konto po ${n} ${HZ.plural(n, "treningu", "treningach", "treningach")}` : "Bez limitu dla gości"); render(); }, text:"Zapisz" })));
+  return [exCard, bandCard, save, codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
@@ -400,6 +408,7 @@ function clientsView(){
     const cs = c.consent || {};
     const delBar = el("div", { class:"row" },
       c.manual ? el("span", { class:"chip", text:"bez konta · wyniki wpisujesz Ty" }) : null,
+      c.guest ? el("span", { class:"chip", text:"gość · jeszcze bez e-maila" }) : null,
       A.confirmDelClient === c.id
         ? el("span", { class:"stack", style:"gap:6px" }, el("span", { class:"small", text: c.manual ? "Usunąć klienta i wszystkie jego wyniki na stałe?" : "Usunąć profil, wszystkie wyniki i wpis w rankingu tego klienta? Jego konto logowania zostanie (usuniesz je w Firebase → Authentication). Tego nie da się cofnąć." }),
             el("span", { class:"row" },
@@ -441,16 +450,50 @@ function clientsView(){
         ev.currentTarget.disabled = true; const { data, error } = await HZ.api.addManualClient(n, HZ.makeConsent(null, { age16:true, ranking:rkIn.checked, by:"trener" }));
         if (error){ toast(error.code === "permission-denied" ? "Firebase odrzucił zapis: wklej aktualny plik firestore.rules w Firestore → Rules i kliknij Publish." : HZ.dbError(error)); render(); return; }
         A.clients.push(data); A.clients.sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl")); toast(`Dodano: ${n}`); render(); }, text:"Dodaj" })));
-  if (!A.clients.length) return [addCard, el("div", { class:"empty" }, el("h3", { text:"Brak klientów" }), el("p", { class:"small", text:"Klienci pojawią się tu po założeniu konta na stronie głównej z kodem klubu albo gdy dodasz ich powyżej." }))];
-  return [addCard, el("div", { class:"card" },
+  const stale = A.clients.filter(c => c.guest && guestIdleDays(c) >= 90);
+  const cleanCard = stale.length ? el("div", { class:"notice" }, el("span", { class:"small", text:`${stale.length} ${HZ.plural(stale.length, "gość nie trenuje", "gości nie trenuje", "gości nie trenuje")} od ponad 90 dni i nie ${stale.length === 1 ? "założył" : "założyło"} konta. Zgodnie z polityką prywatności usuń ich dane.` }),
+    el("button", { class:"danger", async onclick(ev){ ev.currentTarget.disabled = true;
+      for (const c of stale){ const { error } = await HZ.api.deleteClientData(c.id); if (error){ toast(HZ.dbError(error)); break; } A.clients = A.clients.filter(x => x.id !== c.id); }
+      A.rankRows = null; toast("Usunięto nieaktywnych gości"); render(); }, text:"Usuń ich dane" })) : null;
+  if (!A.clients.length) return [inviteCard(), addCard, el("div", { class:"empty" }, el("h3", { text:"Brak klientów" }), el("p", { class:"small", text:"Klienci pojawią się tu po założeniu konta na stronie głównej z kodem klubu albo gdy dodasz ich powyżej." }))];
+  return [inviteCard(), cleanCard, addCard, el("div", { class:"card" },
     el("div", { class:"row between" }, el("h2", { text:`Klienci (${A.clients.length})` }), el("button", { async onclick(){ await loadClients(); render(); toast("Odświeżono"); }, text:"Odśwież" })),
     el("div", { class:"tablewrap" }, el("table", {},
       el("thead", {}, el("tr", {}, el("th", { text:"Imię" }), el("th", { text:"Treningi" }), el("th", { text:"Ostatni" }), el("th", { text:"Śr. zmęcz." }))),
       el("tbody", {}, A.clients.map(c => { const s = A.stats[c.id] || { n:0 };
         return el("tr", {},
-          el("td", {}, el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email }), c.manual ? el("span", { class:"small muted", text:" · bez konta" }) : null),
+          el("td", {}, el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email }), c.manual ? el("span", { class:"small muted", text:" · bez konta" }) : null, c.guest ? el("span", { class:"chip", style:"margin-left:6px", text:"gość" }) : null),
           el("td", { text:s.n }), el("td", { text: s.last ? HZ.fmtDate(s.last) : "–" }),
           el("td", { text: s.fn ? (s.fsum / s.fn).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–" })); })))))];
+}
+
+/* ---------- invite: link + QR ---------- */
+function guestIdleDays(c){ const s = A.stats[c.id]; const last = (s && s.last) || (c.created_at || "").slice(0, 10); if (!last) return 0; return Math.floor((Date.now() - new Date(last + "T12:00:00").getTime()) / 864e5); }
+function inviteLink(){ return HZ.inviteUrl(A.inviteNoCode ? "" : A.joinCode || ""); }
+function inviteCard(){
+  const url = inviteLink();
+  const qr = window.HZQR ? HZQR.svg(url) : null; if (qr) qr.setAttribute("class", "qr");
+  return el("div", { class:"card invite" }, el("h2", { text:"Zaproś na trening" }),
+    el("p", { class:"small muted", text: A.inviteNoCode || !A.joinCode ? "Link prowadzi do aplikacji. Nowa osoba wpisze kod klubu sama." : "Osoba, która zeskanuje kod albo kliknie link, od razu wchodzi jako gość: wpisuje tylko imię. Kod klubu jest już w linku." }),
+    el("div", { class:"invite-body" }, qr ? el("button", { class:"qrbtn", "aria-label":"Pokaż kod QR na cały ekran", onclick(){ A.showQr = true; render(); } }, qr) : null,
+      el("div", { class:"stack", style:"gap:8px;flex:1;min-width:0" },
+        el("input", { id:"invite-url", readonly:true, value:url, onfocus(e){ e.target.select(); } }),
+        el("div", { class:"row" },
+          el("button", { class:"primary", onclick(){ A.showQr = true; render(); }, text:"Pokaż QR na cały ekran" }),
+          el("button", { async onclick(){ try { await navigator.clipboard.writeText(url); toast("Skopiowano link"); } catch(e){ const i = document.getElementById("invite-url"); i.select(); toast("Zaznaczono link – skopiuj go"); } }, text:"Kopiuj link" }),
+          navigator.share ? el("button", { async onclick(){ try { await navigator.share({ title:"Hubzone Weightlifting e-Dziennik", text:"Zapisuj swoje wyniki z treningu w e-Dzienniku Hubzone:", url }); } catch(e){} }, text:"Udostępnij" }) : null),
+        A.joinCode ? el("label", { class:"row small", style:"flex-wrap:nowrap;cursor:pointer" },
+          el("input", { id:"invite-nocode", type:"checkbox", style:"width:auto", checked: A.inviteNoCode || null, onchange(e){ A.inviteNoCode = e.target.checked; render(); } }),
+          el("span", { text:"Link bez kodu klubu (np. do publicznego posta)" })) : el("p", { class:"small", style:"color:var(--bad)", text:"Ustaw kod klubu w zakładce „Ćwiczenia i ustawienia”, wtedy link wpuści od razu." }))));
+}
+function qrScreen(){
+  const url = inviteLink(); const qr = HZQR.svg(url); qr.setAttribute("class", "qr big");
+  return el("div", { class:"qrscreen", onclick(){ A.showQr = false; render(); } },
+    el("div", { class:"brand-mini", text:"Hubzone Weightlifting e-Dziennik" }),
+    qr,
+    el("p", { class:"qrhint", text:"Zeskanuj aparatem telefonu i wpisz swoje imię" }),
+    el("p", { class:"small", style:"opacity:.7;word-break:break-all", text:url }),
+    el("button", { onclick(){ A.showQr = false; render(); }, text:"Zamknij" }));
 }
 
 /* ---------- boot ---------- */

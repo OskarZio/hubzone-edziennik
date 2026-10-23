@@ -28,17 +28,35 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
 HZ.api = {
   /* auth */
-  onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email } } : null)); },
+  onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email || "", guest:!!u.isAnonymous } } : null)); },
   signOut: () => auth.signOut(),
   /* profiles */
   profile: uid => wrap(async () => { const s = await db.doc("users/" + uid).get(); return s.exists ? asProfile(uid, s.data()) : null; }),
-  createProfile: (uid, { name, email, joinCode, consent }) => wrap(() => db.doc("users/" + uid).set({ name, email, isAdmin:false, joinCode, createdAt:new Date().toISOString(), consent })),
+  createProfile: (uid, { name, email, joinCode, consent, guest }) => wrap(() => db.doc("users/" + uid).set({ name, email, isAdmin:false, joinCode, createdAt:new Date().toISOString(), consent, ...(guest ? { guest:true } : {}) })),
+  /* guest: quick entry without e-mail (Firebase anonymous sign-in); same uid is kept when the guest later creates an account */
+  startGuest: ({ name, joinCode, ranking }) => {
+    HZ.registering = (async () => {
+      const cred = await auth.signInAnonymously();
+      const consent = HZ.makeConsent(null, { age16:true, ranking:!!ranking, health:false });
+      const r = await HZ.api.createProfile(cred.user.uid, { name, email:"", joinCode, consent, guest:true });
+      if (r.error){ await cred.user.delete().catch(() => auth.signOut());
+        const e = new Error("profile"); e.code = r.error.code === "permission-denied" ? "hz/join-code" : r.error.code; throw e; }
+    })();
+    return HZ.registering.finally(() => { HZ.registering = null; });
+  },
+  convertGuest: (uid, email, password) => wrap(async () => {
+    const u = auth.currentUser; if (!u || u.uid !== uid || !u.isAnonymous) throw { code:"auth/no-current-user" };
+    await u.linkWithCredential(firebase.auth.EmailAuthProvider.credential(email, password));
+    await u.getIdToken(true);   // new token carries the e-mail, required by the database rules
+    await db.doc("users/" + uid).update({ email, guest:false, convertedAt:new Date().toISOString() });
+    u.sendEmailVerification().catch(() => {});
+  }),
   /* RODO: access / portability (art. 15, 20) and erasure (art. 17) */
   exportMyData: uid => wrap(async () => {
     const [p, l, r] = await Promise.all([db.doc("users/" + uid).get(), db.collection("logs").where("user_id", "==", uid).get(), db.doc("ranking/" + uid).get()]);
@@ -48,11 +66,11 @@ HZ.api = {
   }),
   deleteMyAccount: (uid, password) => wrap(async () => {
     const u = auth.currentUser; if (!u || u.uid !== uid) throw { code:"auth/no-current-user" };
-    await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
+    if (!u.isAnonymous) await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
     await delWhere("user_id", uid);
     await db.doc("ranking/" + uid).delete().catch(() => {});
     await db.doc("users/" + uid).delete();
-    await u.delete();
+    await u.delete().catch(e => { if (!u.isAnonymous) throw e; return auth.signOut(); });
   }),
   deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
@@ -67,6 +85,7 @@ HZ.api = {
   /* trainer data */
   saveLibrary: lib => wrap(() => db.doc("config/library").set(lib, { merge:true })),
   setOwnEnabled: on => wrap(() => db.doc("config/library").set({ ownEnabled:!!on }, { merge:true })),
+  setGuestLimit: n => wrap(() => db.doc("config/library").set({ guestLimit:Math.max(0, Math.min(20, Math.round(n) || 0)) }, { merge:true })),
   setRankingEnabled: on => wrap(() => db.doc("config/library").set({ rankingEnabled:!!on }, { merge:true })),
   ranking: () => wrap(async () => list(await db.collection("ranking").get())),
   myRanking: uid => wrap(async () => { const s = await db.doc("ranking/" + uid).get(); return s.exists ? s.data() : null; }),
@@ -207,7 +226,7 @@ HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(lo
 /* ---------- data ---------- */
 HZ.loadConfig = async () => {
   const s = await db.doc("config/library").get(); const d = s.exists ? s.data() : {};
-  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false };
+  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false, guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
 };
 HZ.loadWorkouts = async () => { S.workouts = list(await db.collection("workouts").get()); };
 HZ.dbError = (e) => {
@@ -678,6 +697,8 @@ function authMsg(err){
   if (c === "auth/too-many-requests") return "Za dużo prób. Odczekaj chwilę i spróbuj ponownie.";
   if (c === "auth/network-request-failed") return "Brak połączenia z internetem.";
   if (c === "auth/operation-not-allowed") return "Logowanie e-mailem nie jest włączone w Firebase (Authentication → Sign-in method).";
+  if (c === "auth/admin-restricted-operation") return "Wejście jako gość nie jest jeszcze włączone. Trener musi włączyć „Anonymous” w Firebase → Authentication → Sign-in method.";
+  if (c === "auth/credential-already-in-use" || c === "auth/provider-already-linked") return "Ten e-mail ma już konto. Użyj innego adresu albo poproś trenera o pomoc.";
   if (c === "hz/join-code") return "Nieprawidłowy kod klubu. Zapytaj trenera o aktualny kod.";
   return "Coś poszło nie tak. Spróbuj ponownie.";
 }
@@ -691,6 +712,13 @@ HZ.passwordProblem = (pass, email) => {
   if (COMMON.some(w => low.includes(w)) || (local.length >= 4 && low.includes(local))) return "To hasło jest zbyt łatwe do odgadnięcia. Wybierz inne.";
   return null;
 };
+/* invite link: index.html?kod=XXXX prefills the club code (kept for this tab only, removed from the address bar) */
+HZ.inviteCode = (() => { try {
+  const u = new URL(location.href), k = (u.searchParams.get("kod") || "").trim().toUpperCase().replace(/[^A-Z0-9ĄĆĘŁŃÓŚŹŻ_-]/g, "").slice(0, 40);
+  if (k){ sessionStorage.setItem("hz-kod", k); u.searchParams.delete("kod"); history.replaceState(null, "", u.pathname + u.search + u.hash); }
+  return sessionStorage.getItem("hz-kod") || "";
+} catch(e){ return ""; } })();
+HZ.inviteUrl = code => { const u = new URL("./", location.href); if (code) u.searchParams.set("kod", code); return u.href; };
 HZ.policyUrl = "polityka-prywatnosci.html";
 HZ.policyLink = (text = "Polityka prywatności") => el("a", { href:HZ.policyUrl, target:"_blank", rel:"noopener", text });
 HZ.footer = () => el("footer", { class:"foot small muted" }, HZ.policyLink(), el("span", { text:" · Hubzone Weightlifting e-Dziennik" }));
@@ -707,7 +735,7 @@ HZ.authView = ({ mode, allowRegister, onMode, title, sub }) => {
   const ageIn = el("input", { id:"au-age", type:"checkbox", style:"width:auto;margin-top:3px" });
   const rankIn = el("input", { id:"au-rank", type:"checkbox", style:"width:auto;margin-top:3px" });
   const nameIn = el("input", { id:"au-name", autocomplete:"given-name", maxlength:"60", placeholder:"np. Kasia" });
-  const codeIn = el("input", { id:"au-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase" });
+  const codeIn = el("input", { id:"au-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase", value:HZ.inviteCode });
   if (mode === "register") form.append(el("label", { class:"f" }, "Imię", nameIn));
   form.append(el("label", { class:"f" }, "E-mail", emailIn));
   if (mode !== "forgot") form.append(el("label", { class:"f" }, mode === "register" ? `Hasło (min. ${HZ.MIN_PASSWORD} znaków, litera i cyfra)` : "Hasło", passIn));

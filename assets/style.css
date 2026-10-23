@@ -167,3 +167,17 @@ label.consent span{line-height:1.35}
 .policy ul{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px}
 .policy td{white-space:normal;vertical-align:top;min-width:120px}
 .policy section p{line-height:1.5}
+
+/* ---------- guests & invite (QR) ---------- */
+.guest-cta{ display:flex; flex-direction:row; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px 14px; }
+.guest-cta > .stack, .guest-cta > span{ flex:1 1 220px; }
+.notice > button{ margin-top:8px; }
+.invite-body{ display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+.qrbtn{ padding:0; border:0; background:#fff; border-radius:10px; line-height:0; flex:0 0 auto; box-shadow:0 0 0 1px var(--line); }
+.qr{ width:148px; height:148px; display:block; border-radius:10px; }
+.qrscreen{ position:fixed; inset:0; z-index:50; background:#fff; color:#111; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:24px 16px; text-align:center; overflow:auto; }
+.qrscreen .qr.big{ width:min(82vw, 62vh, 520px); height:auto; aspect-ratio:1; border-radius:0; }
+.qrscreen .brand-mini{ font-family:var(--display, inherit); font-weight:800; font-size:1.25rem; letter-spacing:.02em; text-transform:uppercase; }
+.qrscreen .qrhint{ font-size:1.2rem; font-weight:600; margin:0; }
+.qrscreen button{ background:#111; color:#fff; border-color:#111; }
+@media (max-width:480px){ .invite-body{ justify-content:center; } .qr{ width:180px; height:180px; } }

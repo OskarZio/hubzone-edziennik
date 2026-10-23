@@ -21,6 +21,7 @@ service cloud.firestore {
     function isManual(uid) { return userDoc(uid).data.get('manual', false) == true; }
     function rankingConsent(uid) { return userDoc(uid).data.get('consent', {}).get('ranking', false) == true; }
 
+    function isAnon() { return request.auth.token.firebase.sign_in_provider == 'anonymous'; }
     function validName(d) { return d.name is string && d.name.size() > 0 && d.name.size() <= 60; }
     function validConsent(c) {
       return c is map && c.keys().hasOnly(['policy', 'at', 'age16', 'ranking', 'health', 'by'])
@@ -41,17 +42,22 @@ service cloud.firestore {
             && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'manual', 'createdAt', 'consent'])
             && validName(request.resource.data)
             && (!('consent' in request.resource.data) || validConsent(request.resource.data.consent)))
-          // klient zakłada własne konto: poprawny kod klubu, zgoda 16+ i akceptacja polityki
+          // klient zakłada własne konto (albo wchodzi jako gość bez e-maila): poprawny kod klubu, zgoda 16+ i akceptacja polityki
         || (signedIn() && request.auth.uid == uid
-            && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'joinCode', 'createdAt', 'consent'])
+            && request.resource.data.keys().hasOnly(['name', 'email', 'isAdmin', 'joinCode', 'createdAt', 'consent', 'guest'])
             && request.resource.data.isAdmin == false
             && validName(request.resource.data)
-            && request.resource.data.email == request.auth.token.email
+            && request.resource.data.email == request.auth.token.get('email', '')
+            && request.resource.data.get('guest', false) == isAnon()
             && validConsent(request.resource.data.consent) && request.resource.data.consent.age16 == true
             && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
       // klient: imię, masa ciała, zgody. Trener: to samo dla klientów bez konta. Rola trenera tylko ręcznie w konsoli.
       allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('manual', false) == true))
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent', 'email', 'guest', 'convertedAt'])
+        // gość zamienia się w konto: tylko on sam, po podpięciu e-maila i hasła (e-mail musi zgadzać się z logowaniem)
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email', 'guest', 'convertedAt'])
+            || (request.auth.uid == uid && !isAnon() && request.resource.data.email == request.auth.token.email
+                && request.resource.data.guest == false && request.resource.data.convertedAt is string))
         && validName(request.resource.data)
         && (!('consent' in request.resource.data) || validConsent(request.resource.data.consent))
         && validBodyweight(request.resource.data);
