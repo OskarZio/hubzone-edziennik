@@ -470,7 +470,7 @@ function clientsView(){
       el("thead", {}, el("tr", {}, el("th", { text:"Imię" }), el("th", { text:"Treningi" }), el("th", { text:"Ostatni" }), el("th", { text:"Śr. zmęcz." }))),
       el("tbody", {}, A.clients.map(c => { const s = A.stats[c.id] || { n:0 };
         return el("tr", {},
-          el("td", {}, el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email }), c.manual ? el("span", { class:"small muted", text:" · bez konta" }) : null, c.guest ? el("span", { class:"chip", style:"margin-left:6px", text:"gość" }) : null),
+          el("td", {}, el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email }), " ", el("button", { class:"ghost small", style:"padding:2px 8px", onclick(){ openClient(c.id); }, text:"+ wyniki" }), c.manual ? el("span", { class:"small muted", text:" · bez konta" }) : null, c.guest ? el("span", { class:"chip", style:"margin-left:6px", text:"gość" }) : null),
           el("td", { text:s.n }), el("td", { text: s.last ? HZ.fmtDate(s.last) : "–" }),
           el("td", { text: s.fn ? (s.fsum / s.fn).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–" })); })))))];
 }

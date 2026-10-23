@@ -181,3 +181,8 @@ label.consent span{line-height:1.35}
 .qrscreen .qrhint{ font-size:1.2rem; font-weight:600; margin:0; }
 .qrscreen button{ background:#111; color:#fff; border-color:#111; }
 @media (max-width:480px){ .invite-body{ justify-content:center; } .qr{ width:180px; height:180px; } }
+
+/* progress: lifts gained */
+.lift{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.lift .gain{ white-space:nowrap; font-weight:700; font-variant-numeric:tabular-nums; padding:4px 10px; border-radius:999px; background:var(--sunk); color:var(--muted); font-size:.9rem; }
+.lift .gain.up{ background:var(--accent-soft); color:var(--accent); }

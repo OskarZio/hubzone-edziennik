@@ -494,6 +494,7 @@ HZ.progressView = (logs, title, key, rerender) => {
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Treningi" }), el("span", { class:"v", text:sorted.length })),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Z grupą" }), el("span", { class:"v", text:sorted.filter(l => !l.own).length })),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Śr. zmęczenie" }), el("span", { class:"v", text: avgF == null ? "–" : avgF.toLocaleString("pl-PL", { maximumFractionDigits:1 }) }))))];
+  { const lc = HZ.liftsCard(sorted); if (lc) out.push(lc); }
   const pts = [];
   for (const l of sorted) for (const e0 of (l.entries || [])) if (keyOf(e0) === cur){
     const e = HZ.workEntry(e0); if (!e) continue;
@@ -686,6 +687,35 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
 };
 
 /* individual stats card (client: Postępy; trainer: client history) */
+/* "Boje": how much more someone lifts now than at the start (top working weight per exercise) */
+HZ.liftsCard = (logs, title = "Ile więcej podnosisz") => {
+  const sorted = [...logs].sort((a,b) => (a.date||"").localeCompare(b.date||""));
+  const mainIds = new Set(S.workouts.flatMap(w => (w.stations || []).filter(st => HZ.secOf(st) === "main").map(st => st.exId)));
+  const rows = new Map();
+  for (const l of sorted) for (const e0 of (l.entries || [])){
+    const e = HZ.workEntry(e0); if (!e || (e.type || "kg") !== "kg") continue;
+    const done = e.sets.filter(x => (x.reps || 0) > 0); if (!done.length) continue;
+    const v = Math.max(...done.map(x => Number(x.load) || 0)); const reps = Math.max(...done.filter(x => (Number(x.load) || 0) === v).map(x => x.reps || 0));
+    const r = rows.get(e.exId) || { exId:e.exId, name:(HZ.exById(e.exId) || {}).name || e.exName || "Ćwiczenie", n:0 };
+    if (!r.first){ r.first = v; r.firstReps = reps; r.firstDate = l.date; }
+    if (r.best == null || v > r.best || (v === r.best && reps > r.bestReps)){ r.best = v; r.bestReps = reps; r.bestDate = l.date; }
+    r.last = v; r.n++; rows.set(e.exId, r);
+  }
+  const all = [...rows.values()];
+  if (!all.length) return null;
+  const main = all.filter(r => mainIds.has(r.exId)), acc = all.filter(r => !mainIds.has(r.exId));
+  const line = r => { const d = Math.round((r.best - r.first) * 100) / 100, pct = r.first > 0 ? Math.round(d / r.first * 100) : null;
+    const bw = HZ.isBwExercise(HZ.exById(r.exId));
+    const kg = v => bw ? (v > 0 ? "+" + HZ.fmtKg(v) : "0") + " kg" : HZ.fmtKg(v) + " kg";
+    return el("div", { class:"lift" },
+      el("div", { class:"stack", style:"gap:2px;min-width:0" }, el("b", { text:r.name }),
+        el("span", { class:"small muted", text: r.n > 1 ? `start ${kg(r.first)} × ${r.firstReps} (${HZ.fmtDate(r.firstDate)}) → rekord ${kg(r.best)} × ${r.bestReps} (${HZ.fmtDate(r.bestDate)})` : `pierwszy wynik: ${kg(r.best)} × ${r.bestReps}` })),
+      el("span", { class:"gain" + (d > 0 ? " up" : ""), text: r.n < 2 ? "start" : d > 0 ? `+${HZ.fmtKg(d)} kg` + (pct != null && !bw ? ` · +${pct}%` : "") : "bez zmian" })); };
+  return el("div", { class:"card" }, el("h2", { text:title }),
+    el("p", { class:"small muted", text:"Najcięższa seria robocza: pierwszy zapisany trening w porównaniu z najlepszym." }),
+    main.length ? el("div", { class:"stack", style:"gap:6px" }, el("h3", { text:"Boje" }), el("div", { class:"list" }, main.map(line))) : null,
+    acc.length ? el("details", { open: main.length ? null : true }, el("summary", { text:`Akcesoria (${acc.length})` }), el("div", { class:"list", style:"margin-top:6px" }, acc.map(line))) : null);
+};
 HZ.personalStats = (logs, title) => {
   const st = HZ.computeStats(logs);
   const tile = (label, value, sub) => el("div", { class:"stat" }, el("span", { class:"eyebrow", text:label }), el("span", { class:"v", text:value }), sub ? el("span", { class:"small muted", text:sub }) : null);
