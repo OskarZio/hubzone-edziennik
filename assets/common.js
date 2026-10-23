@@ -472,7 +472,7 @@ HZ.setsText = (e, withRir = true) => {
 };
 
 /* ---------- progress & chart ---------- */
-const progSel = {};
+const progSel = {}, progMetric = {};
 HZ.progressView = (logs, title, key, rerender) => {
   const { fmtDate, fmtKg, bandName, bandIdx, exById } = HZ;
   const sorted = [...logs].sort((a,b) => (a.date||"").localeCompare(b.date||""));
@@ -495,19 +495,22 @@ HZ.progressView = (logs, title, key, rerender) => {
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Z grupą" }), el("span", { class:"v", text:sorted.filter(l => !l.own).length })),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Śr. zmęczenie" }), el("span", { class:"v", text: avgF == null ? "–" : avgF.toLocaleString("pl-PL", { maximumFractionDigits:1 }) }))))];
   { const lc = HZ.liftsCard(sorted); if (lc) out.push(lc); }
+  const byReps = progMetric[key] === "reps" || (ex.type !== "kg" && ex.type !== "band");
   const pts = [];
   for (const l of sorted) for (const e0 of (l.entries || [])) if (keyOf(e0) === cur){
     const e = HZ.workEntry(e0); if (!e) continue;
     const load = HZ.workLoad(e); let y, lbl;
-    if (ex.type === "kg"){ y = Math.max(...e.sets.map(s => s.load || 0)); lbl = `${fmtKg(y)} kg · ${e.sets.map(s => s.reps).join("/")}`; }
+    const repsTxt = e.sets.map(s => s.reps).join("/");
+    if (byReps){ y = e.sets.reduce((a,s) => a + (s.reps || 0), 0); lbl = `${y} powt. (${repsTxt})` + (ex.type === "kg" ? ` · ${fmtKg(Math.max(...e.sets.map(s => s.load || 0)))} kg` : ex.type === "band" ? ` · ${bandName(load)}` : ""); }
+    else if (ex.type === "kg"){ y = Math.max(...e.sets.map(s => s.load || 0)); lbl = `${fmtKg(y)} kg · ${e.sets.map(s => s.reps).join("/")}`; }
     else if (ex.type === "band"){ const i = load === "none" ? S.config.bands.length : bandIdx(load); if (i < 0) continue; y = i; lbl = `${bandName(load)} · ${e.sets.map(s => s.reps).join("/")}`; }
     else { y = e.sets.reduce((a,s) => a + (s.reps||0), 0); lbl = `${y} powt. łącznie`; }
     pts.push({ x:l.date, y, label:`${fmtDate(l.date)}: ${lbl}`, fatigue:l.fatigue });
   }
   const sel = el("select", { id:"prog-" + key, "aria-label":"Ćwiczenie", onchange(e){ progSel[key] = e.target.value; rerender(); } }, exIds.map(id => el("option", { value:id, text:nameOf(id) })));
   sel.value = cur;
-  const ticks = ex.type === "band" ? [...S.config.bands.map((b,i) => ({ v:i, t:b.name })), { v:S.config.bands.length, t:"bez gumy" }] : null;
-  const yLabel = ex.type === "kg" ? "Największy ciężar w treningu (kg)" : ex.type === "band" ? "Guma (wyżej = mniejsza asysta)" : "Powtórzenia łącznie";
+  const ticks = ex.type === "band" && !byReps ? [...S.config.bands.map((b,i) => ({ v:i, t:b.name })), { v:S.config.bands.length, t:"bez gumy" }] : null;
+  const yLabel = byReps ? "Powtórzenia łącznie w seriach roboczych" : ex.type === "kg" ? "Największy ciężar w treningu (kg)" : ex.type === "band" ? "Guma (wyżej = mniejsza asysta)" : "Powtórzenia łącznie";
   const rows = [...sorted].reverse().flatMap(l => (l.entries || []).filter(e => keyOf(e) === cur).map(e => el("tr", {},
     el("td", { text: fmtDate(l.date) + (l.own ? " (własny)" : "") }),
     el("td", { text: HZ.setsText(e, false) }),
@@ -515,9 +518,12 @@ HZ.progressView = (logs, title, key, rerender) => {
     el("td", { text: l.fatigue ?? "–" }))));
   out.push(el("div", { class:"card" },
     el("div", { class:"row between" }, el("h3", { text:"Wykres postępu" }), el("div", { style:"flex:1 1 180px;max-width:260px" }, sel)),
+    ex.type === "kg" || ex.type === "band" ? el("div", { class:"modes", role:"group", "aria-label":"Co pokazać na wykresie" },
+      [["load", ex.type === "kg" ? "Ciężar" : "Guma"], ["reps", "Powtórzenia"]].map(([m, t]) => el("button", { type:"button", "aria-pressed":String((byReps ? "reps" : "load") === m),
+        onclick(){ progMetric[key] = m; rerender(); }, text:t }))) : null,
     el("span", { class:"small muted", text:yLabel }),
-    compareRow(pts, ex),
-    pts.length ? HZ.lineChart(pts, { ticks, fmt: ex.type === "kg" ? v => fmtKg(v) : v => String(Math.round(v)) }) : el("p", { class:"muted", text:"Brak danych." }),
+    compareRow(pts, byReps ? { type:"reps" } : ex),
+    pts.length ? HZ.lineChart(pts, { ticks, fmt: ex.type === "kg" && !byReps ? v => fmtKg(v) : v => String(Math.round(v)) }) : el("p", { class:"muted", text:"Brak danych." }),
     el("div", { class:"tablewrap" }, el("table", {},
       el("thead", {}, el("tr", {}, el("th", { text:"Data" }), el("th", { text:"Serie" }), el("th", { text:"RIR" }), el("th", { text:"Zmęcz." }))),
       el("tbody", {}, rows)))));
@@ -530,6 +536,7 @@ function compareRow(pts, ex){
   const sign = v => (v > 0 ? "+" : v < 0 ? "−" : "±") ;
   const fmt = (a, b) => {
     const d = a.y - b.y;
+    if (ex.type === "reps") return `${sign(d)}${Math.abs(d)} powt.` + (b.y > 0 && d ? ` (${sign(d)}${Math.round(Math.abs(d) / b.y * 100)}%)` : "");
     if (ex.type === "kg") return `${sign(d)}${HZ.fmtKg(Math.abs(d))} kg` + (b.y > 0 && d ? ` (${sign(d)}${Math.round(Math.abs(d) / b.y * 100)}%)` : "");
     return d === 0 ? "ta sama guma" : `${Math.abs(d)} ${d > 0 ? "słabsz" : "mocniejsz"}${Math.abs(d) === 1 ? "a guma" : "e gumy"}`;
   };
