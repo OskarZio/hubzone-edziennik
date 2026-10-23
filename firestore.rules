@@ -19,6 +19,8 @@ service cloud.firestore {
     function userDoc(uid) { return get(/databases/$(database)/documents/users/$(uid)); }
     // klient bez konta, założony przez trenera (np. bez telefonu)
     function isManual(uid) { return userDoc(uid).data.get('manual', false) == true; }
+    // każdy klient (nie trener): trener może wpisywać mu wyniki, np. treningi sprzed aplikacji
+    function isClient(uid) { return exists(/databases/$(database)/documents/users/$(uid)) && userDoc(uid).data.get('isAdmin', false) != true; }
     function rankingConsent(uid) { return userDoc(uid).data.get('consent', {}).get('ranking', false) == true; }
 
     function isAnon() { return request.auth.token.firebase.sign_in_provider == 'anonymous'; }
@@ -93,11 +95,11 @@ service cloud.firestore {
     match /ranking/{uid} {
       allow read: if isMember();
       allow create, update: if validRank(request.resource.data) && rankingConsent(uid)
-        && ((isMember() && request.auth.uid == uid) || (isAdmin() && isManual(uid)));
+        && ((isMember() && request.auth.uid == uid) || (isAdmin() && isClient(uid)));
       allow delete: if signedIn() && (request.auth.uid == uid || isAdmin());
     }
 
-    // Wpisy treningowe: klient widzi i zmienia tylko swoje, trener widzi wszystkie.
+    // Wpisy treningowe: klient widzi i zmienia tylko swoje, trener widzi wszystkie i może wpisywać je klientom.
     function validLog() {
       let d = request.resource.data;
       return d.keys().hasOnly(['user_id', 'workout_id', 'date', 'own', 'title', 'fatigue', 'note', 'entries', 'saved_at'])
@@ -114,9 +116,9 @@ service cloud.firestore {
     match /logs/{id} {
       allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
       allow create: if validLog() && ((isMember() && request.resource.data.user_id == request.auth.uid)
-        || (isAdmin() && isManual(request.resource.data.user_id)));
+        || (isAdmin() && isClient(request.resource.data.user_id)));
       allow update: if validLog() && request.resource.data.user_id == resource.data.user_id
-        && ((isMember() && resource.data.user_id == request.auth.uid) || (isAdmin() && isManual(resource.data.user_id)));
+        && ((isMember() && resource.data.user_id == request.auth.uid) || (isAdmin() && isClient(resource.data.user_id)));
       allow delete: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
     }
 
