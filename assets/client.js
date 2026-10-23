@@ -160,7 +160,9 @@ function freshSets(w, st, ex, mode){
 }
 function stationCard(w, st, exBase, label, d, isSuper){
   d.mode = d.mode || {};
-  const mode = (d.mode[st.id] && d.mode[st.id] !== "bw" ? d.mode[st.id] : null) || exBase.type; const ex = { ...exBase, type:mode };
+  let mode = HZ.modeFor(exBase, d.mode[st.id]);
+  if (d.mode[st.id] && d.mode[st.id] !== mode){ d.mode[st.id] = mode; d.st[st.id] = null; }   // trainer turned that mode off
+  const ex = { ...exBase, type:mode };
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
   const tRir = HZ.targetRir(w, st);
   const sg = HZ.suggest(C.logs, ex.id, mode, exBase, w.id, tRir);
@@ -175,8 +177,9 @@ function stationCard(w, st, exBase, label, d, isSuper){
       el("div", { class:"row", style:"gap:4px;justify-content:flex-end" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }),
         tRir != null ? el("span", { class:"badge rir", title:"Docelowy zapas powtórzeń", text:`RIR ${tRir}` }) : null)),
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
-    HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }),
+    HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }, exBase),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),
+    isMain && mode === "kg" && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, () => { saveDrafts(); render(); }, `w${w.id}-${st.id}`) : null,
     HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); else updateState(); }, { repsHint:sg.reps, noWarmup:!isMain }),
     (() => { const stt = stationState(w, st, d); const name = label.split(" · ")[0];
       return el("div", { class:"stsave" }, el("span", { class:"state " + stt.kind, "data-state":st.id, text:stt.text }),
@@ -247,9 +250,9 @@ function ownView(){
       el("label", { class:"f" }, "Ćwiczenie", addSel)),
     el("button", { onclick(){ const id = addSel.value; if (!id) return; const ex = HZ.exById(id); const sg = HZ.suggest(C.logs, id, ex.type, ex);
       const last = HZ.history(C.logs, id, null, ex.type)[0]; const tr = last ? last.entry.targetReps : 8; const ts = last ? last.entry.targetSets : 3;
-      o.items.push({ key:HZ.uuid().slice(0,8), exId:id, mode:ex.type, targetReps:tr, targetSets:ts, sets:HZ.buildSets(ex, 0, ts, sg.next ?? null) });
+      o.items.push({ key:HZ.uuid().slice(0,8), exId:id, mode:HZ.modeFor(ex, ex.type), targetReps:tr, targetSets:ts, sets:HZ.buildSets(ex, 0, ts, sg.next ?? null) });
       persist(true); }, text:"+ Dodaj do treningu" }))];
-  o.items.forEach((it, idx) => { const exBase = HZ.exById(it.exId); if (!exBase) return; const mode = (it.mode && it.mode !== "bw" ? it.mode : null) || exBase.type; const ex = { ...exBase, type:mode };
+  o.items.forEach((it, idx) => { const exBase = HZ.exById(it.exId); if (!exBase) return; const mode = HZ.modeFor(exBase, it.mode && it.mode !== "bw" ? it.mode : null); const ex = { ...exBase, type:mode };
     const sg = HZ.suggest(C.logs, ex.id, mode, exBase); HZ.refreshWarmups(ex, it.sets); const curLoad = (it.sets.find(s => !s.warmup) || {}).load;
     out.push(el("section", { class:"card station" },
       el("div", { class:"row between" }, el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:"Ćwiczenie" }), el("h3", { text:ex.name })),
@@ -257,7 +260,7 @@ function ownView(){
       el("div", { class:"grid2" },
         el("label", { class:"f" }, "Plan: serie", el("input", { id:`own-ts-${it.key}`, inputmode:"numeric", value:String(it.targetSets), onchange(e){ it.targetSets = Math.max(1, Math.round(HZ.parseNum(e.target.value) || 1)); persist(); } })),
         el("label", { class:"f" }, "Plan: powtórzenia", el("input", { id:`own-tr-${it.key}`, inputmode:"numeric", value:String(it.targetReps), onchange(e){ it.targetReps = Math.max(1, Math.round(HZ.parseNum(e.target.value) || 1)); persist(); } }))),
-      HZ.modeToggle(mode, m => { it.mode = m; const nsg = HZ.suggest(C.logs, ex.id, m, exBase); it.sets = HZ.buildSets({ ...exBase, type:m }, it.sets.filter(s => s.warmup).length, Math.max(1, it.sets.filter(s => !s.warmup).length), nsg.next ?? null); persist(true); }),
+      HZ.modeToggle(mode, m => { it.mode = m; const nsg = HZ.suggest(C.logs, ex.id, m, exBase); it.sets = HZ.buildSets({ ...exBase, type:m }, it.sets.filter(s => s.warmup).length, Math.max(1, it.sets.filter(s => !s.warmup).length), nsg.next ?? null); persist(true); }, exBase),
       HZ.tipBox(sg, load => { HZ.applyLoad(ex, it.sets, load); persist(true); }, curLoad),
       HZ.setsEditor(ex, it.sets, `own-${it.key}`, re => persist(re), { repsHint:sg.reps }))); });
   if (o.items.length) out.push(el("div", { class:"card" }, el("h3", { text:"Zmęczenie po treningu" }), HZ.fatiguePicker(o.fatigue, v => { o.fatigue = v; persist(true); }),

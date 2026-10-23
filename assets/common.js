@@ -273,7 +273,8 @@ HZ.warmupLoads = (ex, n, next) => {
   /* W1 without load: the trainer's text shows in the weight column */
   if (ex.warmKgScap || (ex.warmLabel && !(Number(ex.warmStart) > 0))){ const rest = HZ.warmupLoads({ ...ex, warmKgScap:false, warmStart:null, warmLabel:"" }, n, next); rest[0] = HZ.SCAP; return rest; }
   const step = HZ.incRange(ex)[0], start = Number(ex.warmStart) > 0 ? Number(ex.warmStart) : null;
-  const r = v => Math.max(0, Math.round(v / step) * step);
+  const ws = next != null && next >= 40 ? Math.max(step, 2.5) : step;   // heavier lifts: whole plate pairs
+  const r = v => Math.max(0, Math.round(v / ws) * ws);
   if (next == null) return Array.from({ length:n }, (_, i) => i === 0 && start ? start : null);
   return Array.from({ length:n }, (_, i) => {
     if (i === 0 && start != null) return Math.min(start, next);
@@ -426,8 +427,27 @@ function customJump(sg, onPick, current){
 }
 /* participant picks how they do the exercise: weight, band or bodyweight */
 HZ.MODE_LABEL = { kg:"Ciężar", band:"Guma", bw:"Masa ciała" };
-HZ.modeToggle = (cur, onPick) => el("div", { class:"modes", role:"group", "aria-label":"Sposób wykonania" },
-  ["kg","band"].filter(m => m !== "band" || S.config.bands.length).map(m => el("button", { type:"button", "aria-pressed":String(cur === m), onclick(){ if (cur !== m) onPick(m); }, text:HZ.MODE_LABEL[m] })));
+/* which ways the trainer allows for an exercise: modes "kg" (weight only), "band" (band only), anything else = both */
+HZ.modesOf = ex => { const all = ex && ex.modes === "kg" ? ["kg"] : ex && ex.modes === "band" ? ["band"] : ["kg","band"];
+  const ok = all.filter(m => m !== "band" || S.config.bands.length); return ok.length ? ok : ["kg"]; };
+HZ.modeFor = (exBase, wanted) => { const ok = HZ.modesOf(exBase); return ok.includes(wanted) ? wanted : ok.includes(exBase.type) ? exBase.type : ok[0]; };
+HZ.modeToggle = (cur, onPick, exBase) => { const ok = exBase ? HZ.modesOf(exBase) : ["kg","band"].filter(m => m !== "band" || S.config.bands.length);
+  if (ok.length < 2) return null;
+  return el("div", { class:"modes", role:"group", "aria-label":"Sposób wykonania" },
+  ok.map(m => el("button", { type:"button", "aria-pressed":String(cur === m), onclick(){ if (cur !== m) onPick(m); }, text:HZ.MODE_LABEL[m] }))); };
+/* "target weight" for the working sets: warm-ups are calculated from it (W2 ≈60%, W3 ≈80%; W1 set by the trainer) */
+HZ.targetBox = (ex, sets, onSet, idp) => {
+  const work = sets.find(s => !s.warmup); const cur = work && typeof work.load === "number" ? work.load : null;
+  const inp = el("input", { id:idp + "-target", inputmode:"decimal", placeholder:"np. 80", value: cur != null ? HZ.fmtKg(cur) : "", style:"max-width:6.5rem;text-align:center" });
+  const go = () => { const v = HZ.parseNum(inp.value); if (v == null || v < 0 || v > 500){ HZ.toast("Wpisz ciężar serii roboczych w kg, np. 80."); return; }
+    const before = JSON.stringify(sets);
+    for (const s of sets){ if (!s.warmup) s.load = v; else if (s.reps == null) s.manual = false; }
+    HZ.refreshWarmups(ex, sets); if (JSON.stringify(sets) !== before) setTimeout(onSet, 0); };
+  inp.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); go(); } });
+  inp.addEventListener("change", go);
+  return el("div", { class:"target" }, el("label", { class:"f", for:idp + "-target", text:"Ciężar serii roboczych (kg)" }),
+    el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px" }, inp, el("button", { type:"button", class: cur == null ? "primary" : "", onclick: go, text:"Oblicz serie wstępne" })),
+    el("span", { class:"small muted", text: cur == null ? "Nie wiesz, ile na rozgrzewkę? Wpisz ciężar, którym robisz serie, a wyliczymy W2 ≈60% i W3 ≈80%." : "W2 ≈60%, W3 ≈80% ciężaru roboczego, zaokrąglone do talerzy." })); };
 /* working sets reset to a new load (warm-ups without reps follow for kg) */
 HZ.applyLoad = (ex, sets, load) => {
   for (const s of sets) if (!s.warmup) s.load = load;

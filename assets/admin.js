@@ -101,7 +101,10 @@ function settingsView(){
         el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.exercises[i-1], c.exercises[i]] = [c.exercises[i], c.exercises[i-1]]; render(); }, text:"↑" }),
         el("button", { class:"ghost", "aria-label":"Usuń ćwiczenie", onclick(){ c.exercises.splice(i, 1); render(); }, text:"✕" })),
       el("div", { class:"grid2" },
-        el("label", { class:"f" }, "Domyślny sposób", el("select", { id:`ex-t-${e.id || i}`, value:e.type, onchange(ev){ e.type = ev.target.value; render(); } }, Object.entries(HZ.TYPE_LABEL).filter(([k]) => k !== "bw").map(([k,v]) => el("option", { value:k, text:v })))),
+        el("label", { class:"f", style:"grid-column:1/-1" }, "Sposób wykonania", el("select", { id:`ex-t-${e.id || i}`, value:`${e.modes === "kg" || e.modes === "band" ? e.modes : "both"}:${e.type}`,
+          onchange(ev){ const [m, t] = ev.target.value.split(":"); e.modes = m; e.type = t; render(); } },
+          el("option", { value:"both:kg", text:"Ciężar lub guma (domyślnie ciężar)" }), el("option", { value:"both:band", text:"Ciężar lub guma (domyślnie guma)" }),
+          el("option", { value:"kg:kg", text:"Tylko ciężar (bez gumy, np. przysiad)" }), el("option", { value:"band:band", text:"Tylko guma" }))),
         el("details", { class:"w1", style:"grid-column:1/-1", open: (e.warmStart || (e.warmBand && e.warmBand !== HZ.SCAP) || e.warmLabel || e.warmReps || e.warmKgScap) ? true : null },
           el("summary", { text:"Seria wstępna W1 i ranking (ustalasz sam)" }),
           el("div", { class:"grid2", style:"margin-top:8px" },
@@ -174,7 +177,7 @@ function settingsView(){
   return [exCard, bandCard, save, codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 async function saveLibrary(c){
-  const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type:e.type, incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
+  const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type: e.modes === "kg" ? "kg" : e.modes === "band" ? "band" : e.type, modes: e.modes === "kg" || e.modes === "band" ? e.modes : "both", incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
     warmBand: e.warmBand || HZ.SCAP, warmKgScap: !!e.warmKgScap, bwBased: e.bwBased ?? e.type === "band", warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
   const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null, kgMax: Number(b.kgMax) > Number(b.kg) ? Math.round(Number(b.kgMax) * 10) / 10 : null }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
@@ -340,7 +343,9 @@ function entryView(){
     const items = order.filter(st => HZ.secOf(st) === sec.key && HZ.exById(st.exId)); if (!items.length) continue;
     out.push(el("div", { class:"sechead" }, el("h2", { text:sec.title }), el("span", { class:"eyebrow", text:sec.sub })));
     for (const st of items){
-      const exBase = HZ.exById(st.exId), mode = d.mode[st.id] || exBase.type, ex = { ...exBase, type:mode }, isMain = sec.key === "main";
+      const exBase = HZ.exById(st.exId), isMain = sec.key === "main";
+      const mode = HZ.modeFor(exBase, d.mode[st.id]); if (d.mode[st.id] && d.mode[st.id] !== mode){ d.mode[st.id] = mode; d.st[st.id] = null; }
+      const ex = { ...exBase, type:mode };
       const sets = d.st[st.id] || (d.st[st.id] = entrySets(w, st, exBase, mode, logs));
       HZ.refreshWarmups(ex, sets);
       const tRir = HZ.targetRir(w, st); const sg = HZ.suggest(logs, ex.id, mode, exBase, w.id, tRir);
@@ -348,8 +353,9 @@ function entryView(){
         el("div", { class:"row between", style:"align-items:flex-start" },
           el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:labels[st.id] }), el("h3", { text:ex.name })),
           el("div", { class:"row", style:"gap:4px" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }), tRir != null ? el("span", { class:"badge rir", text:`RIR ${tRir}` }) : null)),
-        HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = entrySets(w, st, exBase, m, logs); render(); }),
+        HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = entrySets(w, st, exBase, m, logs); render(); }, exBase),
         HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); render(); }, (sets.find(s => !s.warmup) || {}).load),
+        isMain && mode === "kg" && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, render, `en-${st.id}`) : null,
         HZ.setsEditor(ex, sets, `en-${st.id}`, structural => { if (structural) render(); }, { repsHint:sg.reps, noWarmup:!isMain })));
     }
   }
