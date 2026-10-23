@@ -221,7 +221,7 @@ HZ.defaultWorkoutId = () => {
   const soon = ws.find(w => w.date > t && (new Date(w.date) - new Date(t)) <= 2*864e5);
   return (soon || past[past.length-1] || ws[0]).id;
 };
-HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(load) : "–"; if (type === "kg") return load == null ? "–" : HZ.fmtKg(load) + " kg"; return load ? "+" + HZ.fmtKg(load) + " kg" : "masa ciała"; };
+HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(load) : "–"; if (type === "kg") return load == null ? "–" : load === 0 ? "bez ciężaru" : HZ.fmtKg(load) + " kg"; return load ? "+" + HZ.fmtKg(load) + " kg" : "masa ciała"; };
 
 /* ---------- data ---------- */
 HZ.loadConfig = async () => {
@@ -366,8 +366,12 @@ HZ.fatiguePicker = (cur, onPick) => el("div", { class:"fatigue", role:"group", "
 HZ.loadInput = (ex, val, onVal, id) => {
   if (ex.type === "band") return el("select", { id, "aria-label":"Guma", value: val || "", onchange(e){ onVal(e.target.value || null); } },
     el("option", { value:"", text:"–" }), S.config.bands.map(b => el("option", { value:b.id, text: b.name + (b.kg ? ` ~${HZ.bandKgText(b)} kg` : "") })), el("option", { value:"none", text:"bez gumy" }));
-  return el("input", { id, inputmode:"decimal", placeholder: ex.type === "bw" ? "+kg" : "kg", "aria-label": ex.type === "bw" ? "Dodatkowe obciążenie" : "Ciężar w kg",
+  /* kg: 0 = without weight (e.g. dips / pull-ups with body weight only) */
+  if (ex.type === "kg" && val === 0) return el("button", { type:"button", id, class:"nokg", title:"Stuknij, żeby wpisać ciężar", onclick(){ onVal(null); }, text:"bez ciężaru" });
+  const inp = el("input", { id, inputmode:"decimal", placeholder: ex.type === "bw" ? "+kg" : "kg", "aria-label": ex.type === "bw" ? "Dodatkowe obciążenie" : "Ciężar w kg",
     value: val == null ? "" : HZ.fmtKg(val), onchange(e){ onVal(HZ.parseNum(e.target.value)); } });
+  if (ex.type !== "kg") return inp;
+  return el("div", { class:"kgwrap" }, inp, el("button", { type:"button", class:"nokg-btn", "aria-label":"Bez ciężaru", title:"Bez ciężaru (0 kg)", onclick(){ onVal(0); }, text:"bez" }));
 };
 /* RIR as a row of tap targets 0–5 (tap again to clear) */
 HZ.rirPicker = (val, onVal, id) => {
@@ -464,7 +468,7 @@ HZ.refreshWarmups = (ex, sets) => {
 HZ.buildSets = (ex, nWarm, nWork, next) => [
   ...HZ.warmupLoads(ex, nWarm, next).map(load => ({ load, reps:null, rir:null, warmup:true })),
   ...Array.from({ length:nWork }, () => ({ load: ex.type === "band" ? (next || "") : (next ?? null), reps:null, rir:null })) ];
-HZ.setText = (e, s) => s.load === HZ.SCAP ? "aktywacja×" + s.reps : (e.type === "band" ? HZ.bandName(s.load) : e.type === "kg" ? HZ.fmtKg(s.load) : (s.load ? "+" + HZ.fmtKg(s.load) : "MC")) + "×" + s.reps;
+HZ.setText = (e, s) => s.load === HZ.SCAP ? "aktywacja×" + s.reps : (e.type === "band" ? HZ.bandName(s.load) : e.type === "kg" ? (s.load === 0 ? "bez ciężaru" : HZ.fmtKg(s.load)) : (s.load ? "+" + HZ.fmtKg(s.load) : "MC")) + "×" + s.reps;
 HZ.setsText = (e, withRir = true) => {
   const warm = HZ.warmSets(e), work = (e.sets || []).filter(s => !s.warmup);
   const w = warm.length ? "wstępne: " + warm.map(s => HZ.setText(e, s)).join(", ") + " | " : "";

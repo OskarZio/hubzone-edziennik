@@ -186,3 +186,9 @@ label.consent span{line-height:1.35}
 .lift{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .lift .gain{ white-space:nowrap; font-weight:700; font-variant-numeric:tabular-nums; padding:4px 10px; border-radius:999px; background:var(--sunk); color:var(--muted); font-size:.9rem; }
 .lift .gain.up{ background:var(--accent-soft); color:var(--accent); }
+
+/* kg field: "bez ciężaru" (0 kg) */
+.kgwrap{ display:flex; gap:4px; align-items:stretch; flex:1; min-width:0; }
+.kgwrap input{ flex:1; min-width:0; }
+.nokg-btn{ padding:0 8px; font-size:.75rem; font-weight:600; color:var(--muted); background:var(--sunk); border:1px solid var(--line); border-radius:8px; white-space:nowrap; }
+.nokg{ flex:1; min-width:0; font-size:.85rem; font-weight:600; background:var(--accent-soft); color:var(--accent); border:1px dashed var(--accent); border-radius:8px; padding:8px 6px; white-space:nowrap; }
