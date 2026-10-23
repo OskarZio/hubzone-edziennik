@@ -30,7 +30,7 @@ async function loadClients(){
   if (pr.error) throw pr.error; if (lg.error) throw lg.error;
   A.admins = pr.data.filter(p => p.is_admin);
   A.clients = pr.data.filter(p => !p.is_admin).sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl"));
-  A.stats = {};
+  A.stats = {}; A.allLogs = lg.data;
   for (const l of lg.data){ const s = A.stats[l.user_id] || (A.stats[l.user_id] = { n:0, last:null, fsum:0, fn:0 });
     s.n++; if (!s.last || l.date > s.last) s.last = l.date; if (l.fatigue != null){ s.fsum += l.fatigue; s.fn++; } }
 }
@@ -66,9 +66,33 @@ function body(){
         const consent = new Set(A.clients.filter(c => c.consent && c.consent.ranking).map(c => c.id));
         const drop = rows.filter(x => admins.has(x.id) || !consent.has(x.id));   // trainers and people without consent are not ranked
         for (const x of drop) await HZ.api.deleteRanking(x.id);
-        A.rankRows = rows.filter(x => !drop.includes(x)); if (r.error) toast(HZ.dbError(r.error)); render(); });
+        // rebuild rows of everyone who agreed (also clients who have not opened the app since their results were entered)
+        const keep = rows.filter(x => !drop.includes(x)); const byId = new Map(keep.map(x => [x.id, x]));
+        let denied = false;
+        for (const c of A.clients.filter(c => consent.has(c.id))){
+          const logs = (A.allLogs || []).filter(l => l.user_id === c.id); if (!logs.length) continue;
+          const old = byId.get(c.id) || {};
+          const row = { name:c.name || "", ...HZ.rankRow(HZ.computeStats(logs), c.consent.health ? c.bodyweight : null), hidden: old.hidden === true };
+          const { updatedAt, id, ...prev } = old;
+          if (JSON.stringify(prev) === JSON.stringify(row)) continue;
+          const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() });
+          if (w.error){ denied = true; continue; }
+          byId.set(c.id, { id:c.id, ...row });
+        }
+        if (denied) toast("Części wierszy nie zapisano: wgraj nowe reguły bazy (skrypt u.py albo Firestore → Rules).");
+        A.rankRows = [...byId.values()]; if (r.error) toast(HZ.dbError(r.error)); render(); });
       return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
+    const inRank = new Set(A.rankRows.map(x => x.id));
+    const missing = A.clients.filter(c => !inRank.has(c.id)).map(c => {
+      const cs = c.consent || {}, n = (A.stats[c.id] || { n:0 }).n;
+      const why = !cs.ranking ? (c.manual ? "brak zgody – zaznacz ją w karcie klienta (Klienci → imię)" : "nie włączył/-a rankingu – w aplikacji: Konto → „Pokazuj mnie w rankingu”")
+        : !n ? "zgoda jest, ale nie ma jeszcze żadnego treningu" : "zgoda jest – kliknij Odśwież";
+      return { c, why }; });
     return [...HZ.rankingView(A.rankRows, null, render, { showHidden:true }),
+      missing.length ? el("div", { class:"card" }, el("h3", { text:`Nie ma w rankingu (${missing.length})` }),
+        el("p", { class:"small muted", text:"Ranking pokazuje tylko osoby, które się na to zgodziły (RODO). Klient z kontem włącza to sam; za klienta bez konta zaznaczasz zgodę Ty." }),
+        el("div", { class:"list" }, missing.map(({ c, why }) => el("div", { class:"row between", style:"flex-wrap:nowrap" },
+          el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email || "Klient" }), el("span", { class:"small muted", style:"text-align:right", text:why }))))) : null,
       el("div", { class:"row" }, el("button", { onclick(){ A.rankRows = null; render(); }, text:"Odśwież" }),
         el("span", { class:"small muted", text: S.config.rankingEnabled ? "Klienci widzą ranking. Osoby ukryte widzisz tylko Ty." : "Ranking jest wyłączony dla klientów (Ćwiczenia i ustawienia)." }))];
   }
