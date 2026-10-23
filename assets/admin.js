@@ -407,6 +407,7 @@ async function saveEntry(btn){
   if (error){ toast(HZ.dbError(error)); btn.disabled = false; return; }
   const all = logs.filter(l => l.id !== data.id).concat(data);
   if (S.config.rankingEnabled !== false) await syncManualRanking(client, all);
+  if (A.clientId === client.id) A.clientLogs = all;   // client view shows the new entry right away
   A.entry = null; A.rankRows = null; toast(`Zapisano wyniki: ${client.name}`);
   await loadClients().catch(() => {}); loadResults(w.id);
 }
