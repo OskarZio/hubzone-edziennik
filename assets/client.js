@@ -109,7 +109,7 @@ function rankingTab(){
 }
 function body(){
   if (C.tab === "ranking" && S.config.rankingEnabled) return rankingTab();
-  if (C.tab === "progress") return C.logs.length ? [HZ.personalStats(C.logs, "Twoje statystyki", C.appr), ...HZ.progressView(C.logs, "Twoje postępy", "me", render)] : HZ.progressView(C.logs, "Twoje postępy", "me", render);
+  if (C.tab === "progress") return C.logs.length ? [HZ.progressLegend(), HZ.personalStats(C.logs, "Twoje statystyki", C.appr), ...HZ.progressView(C.logs, "Twoje postępy", "me", render)] : HZ.progressView(C.logs, "Twoje postępy", "me", render);
   if (C.tab === "own" && S.config.ownEnabled) return ownView();
   if (C.tab === "account") return accountView();
   return todayView();
@@ -135,7 +135,8 @@ function draftFor(w){
   for (const st of (w.stations || [])){
     const ex = HZ.exById(st.exId); if (!ex) continue;
     const prev = existing && (existing.entries || []).find(e => e.stationId === st.id);
-    d.mode[st.id] = prev && prev.type !== "bw" ? (prev.type || ex.type) : ex.type;
+    const pt = C.plan && C.plan[ex.id] && C.plan[ex.id].type; const planMode = pt && HZ.modesOf(ex).includes(pt) && HZ.trainerTip(C.plan, C.logs, ex.id, pt) ? pt : null;
+    d.mode[st.id] = prev && prev.type !== "bw" ? (prev.type || ex.type) : (planMode || ex.type);
     if (prev) d.st[st.id] = prev.sets.map(s => ({ load:s.load ?? null, reps:s.reps ?? null, rir:s.rir ?? null, ...(s.warmup ? { warmup:true } : {}) }));
     else d.st[st.id] = freshSets(w, st, ex, d.mode[st.id]);
   }
@@ -199,9 +200,9 @@ function stationCard(w, st, exBase, label, d, isSuper){
   const isMain = HZ.secOf(st) === "main";
   if (!isMain && sets.some(x => x.warmup)){ const keep = sets.filter(x => !x.warmup); sets.length = 0; sets.push(...keep); }
   const extra = [isMain && st.warmup ? `+ ${st.warmup} ${HZ.plural(st.warmup, "seria wstępna", "serie wstępne", "serii wstępnych")}` : null, st.work ? `praca ${st.work}` : null, st.rest ? `przerwa ${st.rest}` : null, st.note].filter(Boolean);
-  return el("section", { class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") + (isSuper ? " super" : "") },
+  return el("section", { class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") + (isSuper ? " super" : "") + (HZ.kindOf(exBase) ? " k-" + HZ.kindOf(exBase) : "") },
     el("div", { class:"row between", style:"align-items:flex-start" },
-      el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", { text:ex.name })),
+      el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", {}, HZ.kindDot(exBase), HZ.kindOf(exBase) ? " " : null, ex.name)),
       el("div", { class:"row", style:"gap:4px;justify-content:flex-end" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }),
         tRir != null ? el("span", { class:"badge rir", title:"Docelowy zapas powtórzeń", text:`RIR ${tRir}` }) : null)),
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,

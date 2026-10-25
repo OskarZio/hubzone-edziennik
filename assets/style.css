@@ -244,3 +244,11 @@ table.rank td .medal.sm{ vertical-align:middle; }
 /* trainer's plan for this training */
 .tip.plan{ background:var(--accent-soft); border-color:var(--accent); }
 .tip.plan .ic{ color:var(--accent); }
+
+/* exercise colour: green = heavy (small jumps), red = bigger jumps */
+.kdot{ display:inline-block; width:.7em; height:.7em; border-radius:50%; vertical-align:middle; margin-right:2px; }
+.kdot.heavy{ background:#2f9e44; } .kdot.light{ background:#e03131; }
+.station.k-heavy{ border-left-color:#2f9e44 !important; } .station.k-light{ border-left-color:#e03131 !important; }
+.chip.k-heavy{ box-shadow:inset 3px 0 0 #2f9e44; } .chip.k-light{ box-shadow:inset 3px 0 0 #e03131; }
+.legend summary{ cursor:pointer; font-weight:700; }
+.legend ol{ margin:8px 0 0; padding-left:1.2em; display:grid; gap:4px; }
