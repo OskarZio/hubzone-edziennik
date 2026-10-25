@@ -114,7 +114,42 @@ function body(){
   if (C.tab === "account") return accountView();
   return todayView();
 }
-function currentId(){ const ws = HZ.sortedWorkouts(); if (C.sel && ws.some(w => w.id === C.sel)) return C.sel; return HZ.defaultWorkoutId(); }
+/* only today's training (in the chosen group); older ones open from "Do uzupełnienia" */
+const myGroup = () => HZ.groupsOn() ? (C.group !== undefined ? C.group : (C.group = HZ.LS.get("hz-group") || null)) : null;
+const inGroup = w => !HZ.groupsOn() || !myGroup() || (w.group || "") === myGroup();
+const todays = () => HZ.sortedWorkouts().filter(w => w.date === HZ.todayISO() && inGroup(w));
+function currentId(){ const ws = HZ.sortedWorkouts(); if (C.sel && ws.some(w => w.id === C.sel)) return C.sel; const t = todays(); return t.length === 1 ? t[0].id : null; }
+/* earlier trainings with something typed in but not sent (or only partly saved) */
+function toFinish(){
+  const today = HZ.todayISO();
+  return HZ.sortedWorkouts().filter(w => w.date < today).filter(w => {
+    const d = C.drafts[w.id], log = C.logs.find(l => l.workout_id === w.id);
+    const typed = d && d.st && Object.values(d.st).some(sets => (sets || []).some(x => x.reps != null));
+    const visible = (w.stations || []).filter(st => HZ.exById(st.exId) && (HZ.secOf(st) === "main" || HZ.feat("acc", C.profile))).length;
+    if (log) return (log.entries || []).length < visible || (typed && JSON.stringify(buildEntries(w, d)) !== JSON.stringify(log.entries));
+    return typed; }).reverse();
+}
+function finishCard(){
+  const list = toFinish(); if (!list.length) return null;
+  return el("div", { class:"card" }, el("h3", { text:"Do uzupełnienia" }),
+    el("p", { class:"small muted", text:"Wcześniejsze treningi, w których masz coś wpisane, ale niewysłane albo nie wszystko." }),
+    el("div", { class:"list" }, list.map(w => { const log = C.logs.find(l => l.workout_id === w.id);
+      return el("div", { class:"row between", style:"flex-wrap:nowrap" },
+        el("span", { style:"min-width:0" }, el("b", { text:HZ.fmtDate(w.date, true) }), el("span", { class:"small muted", text:" · " + (w.title || (HZ.groupsOn() && HZ.groupName(w.group)) || "Trening") + (log ? " · zapisane częściowo" : " · wersja robocza") })),
+        el("button", { class:"primary", onclick(){ C.sel = w.id; render(); window.scrollTo(0, 0); }, text:"Uzupełnij" })); })));
+}
+function groupPicker(){
+  const t = HZ.todayISO();
+  return el("div", { class:"card" }, el("h2", { text:"Wybierz swój trening" }),
+    el("div", { class:"stack", style:"gap:8px" }, S.config.groups.map(g => { const today = S.workouts.some(w => w.date === t && (w.group || "") === g.id);
+      return el("button", { class: today ? "primary" : "", onclick(){ C.group = g.id; HZ.LS.set("hz-group", g.id); C.sel = null; render(); }, text: g.name + (today ? " · dziś" : "") }); })));
+}
+function noTraining(){
+  const next = HZ.sortedWorkouts().find(w => w.date > HZ.todayISO() && inGroup(w));
+  return el("div", { class:"card locked" }, el("h3", { text:"Obecnie nie ma treningu" }),
+    el("p", { class:"small muted", text: next ? `Najbliższy: ${HZ.fmtDate(next.date, true)}${next.title ? " · " + next.title : ""}.` : "Trener doda plan przed zajęciami." }),
+    S.config.ownEnabled ? el("button", { onclick(){ C.tab = "own"; render(); }, text:"Zapisz trening własny" }) : null);
+}
 
 /* ---------- today ---------- */
 const DRAFT_V = 3;   // bump when warm-up rules change: untouched warm-ups in old drafts get recalculated
@@ -143,23 +178,24 @@ function draftFor(w){
   C.drafts[w.id] = d; return d;
 }
 function todayView(){
-  const ws = HZ.sortedWorkouts(); const wid = currentId(); const w = ws.find(x => x.id === wid);
-  if (!w) return [el("div", { class:"empty" }, el("h3", { text:"Trener nie dodał jeszcze treningu" }),
-    el("p", { class:"small", text:"Gdy pojawi się piątkowy plan, zobaczysz tu stacje i miejsce na swoje serie." }),
-    S.config.ownEnabled ? el("button", { onclick(){ C.tab = "own"; render(); }, text:"Zapisz trening własny" }) : null)];
-  const saved = C.logs.find(l => l.workout_id === w.id);
   livePoll();
-  if (HZ.groupsOn() && !C.sel){ const same = ws.filter(x => x.date === w.date); if (same.length > 1) return groupChooser(same); }
-  if (isLocked(w)) return lockedView(ws, w, saved);
+  const ws = HZ.sortedWorkouts();
+  if (HZ.groupsOn() && !myGroup() && !C.sel) return [groupPicker(), finishCard()];
+  const groupBar = HZ.groupsOn() && myGroup() ? el("div", { class:"row between small" }, el("span", { class:"muted", text:"Grupa: " + (HZ.groupName(myGroup()) || "–") }),
+    el("button", { class:"link", onclick(){ C.group = null; HZ.LS.set("hz-group", null); C.sel = null; render(); }, text:"Zmień" })) : null;
+  if (!C.sel && todays().length > 1) return [groupBar, groupChooser(todays()), finishCard()];
+  const wid = currentId(); const w = ws.find(x => x.id === wid);
+  if (!w) return [groupBar, noTraining(), finishCard()];
+  const saved = C.logs.find(l => l.workout_id === w.id);
+  const back = C.sel && w.date !== HZ.todayISO() ? el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ C.sel = null; render(); }, text:"← Dzisiejszy trening" }) : null;
+  if (isLocked(w)) return [back, ...lockedView(ws, w, saved)];
   const d = draftFor(w);
-  const pick = el("select", { id:"wsel", "aria-label":"Wybierz trening", onchange(e){ C.sel = e.target.value; render(); } },
-    [...ws].reverse().map(x => el("option", { value:x.id, text:`${HZ.workoutLabel(x)}` })));
-  pick.value = w.id;
-  const out = [el("div", { class:"row between" },
+  const pick = el("span", { class:"chip", text:HZ.fmtDate(w.date, true) + (C.sel && w.date !== HZ.todayISO() ? " · uzupełniasz" : "") });
+  const out = [groupBar, back, el("div", { class:"row between" },
     el("div", { class:"stack", style:"gap:2px" }, el("h2", { text: w.title || `Trening #${HZ.workoutNo(w.id)}` }),
       el("span", { class:"small muted", text:`${(() => { const st = w.stations || [], m = st.filter(x => HZ.secOf(x) === "main").length, a = st.length - m;
         return [m ? `${m} ${HZ.plural(m, "bój", "boje", "bojów")}` : null, a ? `${a} ${HZ.plural(a, "stacja", "stacje", "stacji")}` : null].filter(Boolean).join(" · "); })()}${saved ? " · wysłano " + new Date(saved.saved_at).toLocaleTimeString("pl-PL", { hour:"2-digit", minute:"2-digit" }) : ""}` })),
-    el("div", { style:"max-width:240px;flex:1 1 170px" }, pick))];
+    pick)];
   if (w.note) out.push(el("p", { class:"muted", text:w.note }));
   if (custom() && C.profile.task) out.push(el("div", { class:"notice" }, el("b", { text:"Zadanie od trenera: " }), C.profile.task));
   if (C.profile.guest) out.unshift(guestBanner());
@@ -179,6 +215,7 @@ function todayView(){
     HZ.feat("pain", C.profile) ? painBox(d) : null,
     el("label", { class:"f" }, "Notatka do trenera / feedback (opcjonalnie)", el("textarea", { id:"note-" + w.id, maxlength:"1000", value:d.note, oninput(e){ d.note = e.target.value; saveDrafts(); } })),
     el("button", { class:"primary", onclick(e){ saveWorkout(w, d, e.currentTarget); }, text: saved ? "Zapisz zmiany" : "Wyślij wyniki do trenera" })));
+  if (!C.sel || w.date === HZ.todayISO()) out.push(finishCard());
   return out;
 }
 function freshSets(w, st, ex, mode){
@@ -454,11 +491,9 @@ function lockedView(ws, w, saved){
   clearInterval(lockPoll);
   if (!w.closedAt) lockPoll = setInterval(async () => { if (document.visibilityState !== "visible" || C.tab !== "today") return;
     await HZ.loadWorkouts().catch(() => {}); const nw = S.workouts.find(x => x.id === w.id); if (nw && nw.open){ clearInterval(lockPoll); toast("Trening się zaczął – wpisuj serie!"); render(); } }, 15000);
-  const pick = el("select", { id:"wsel", "aria-label":"Wybierz trening", onchange(e){ C.sel = e.target.value; render(); } },
-    [...ws].reverse().map(x => el("option", { value:x.id, text:`${HZ.workoutLabel(x)}` })));
-  pick.value = w.id;
+  const pick = el("span", { class:"chip", text:HZ.fmtDate(w.date, true) });
   const names = HZ.orderStations(w.stations || []).filter(st => HZ.secOf(st) === "main" || HZ.feat("acc", C.profile)).map(st => (HZ.exById(st.exId) || {}).name).filter(Boolean);
-  return [el("div", { class:"row between" }, el("h2", { text: w.title || `Trening #${HZ.workoutNo(w.id)}` }), el("div", { style:"max-width:240px;flex:1 1 170px" }, pick)),
+  return [el("div", { class:"row between" }, el("h2", { text: w.title || `Trening #${HZ.workoutNo(w.id)}` }), pick),
     el("div", { class:"card locked" }, el("h3", { text: w.closedAt ? "Trening zakończony" : "Trening jeszcze się nie zaczął" }),
       el("p", { class:"small muted", text: w.closedAt ? "Trener zamknął wpisywanie wyników z tego treningu." : "Trener otworzy wpisywanie na zajęciach. Strona sama to wykryje, możesz też odświeżyć." }),
       names.length ? el("p", { class:"small", text:"W planie: " + names.join(", ") }) : null,

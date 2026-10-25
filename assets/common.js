@@ -206,7 +206,7 @@ HZ.plural = (n, one, few, many) => n === 1 ? one : (n%10 >= 2 && n%10 <= 4 && (n
 /* re-render keeping scroll and the field the user just tapped */
 HZ.swap = (app, nodes) => {
   const y = window.scrollY, a = document.activeElement, id = a && a.id, sel = a && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
-  app.replaceChildren(...nodes.filter(Boolean)); window.scrollTo(0, y);
+  app.replaceChildren(...nodes.flat(Infinity).filter(Boolean)); window.scrollTo(0, y);
   if (id){ const n = document.getElementById(id); if (n && n !== a){ n.focus({ preventScroll:true }); if (sel && typeof n.setSelectionRange === "function") try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
 };
 /* appearance card: theme + accent */
