@@ -548,7 +548,7 @@ function planCard(c){
     el("div", { class:"list" }, items.map(([exId, type]) => {
       const ex = HZ.exById(exId), base = S.config.features.custom ? HZ.progEx(ex, c.progression) : ex;
       const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), exId, type, base);
-      const tip = HZ.trainerTip(A.clientPlan, logs, exId, type);
+      const tip = HZ.trainerTip(A.clientPlan, logs, exId, (A.clientPlan[exId] || {}).type || type);   // the plan's own mode (may differ from the last session)
       const lastE = sorted.map(l => (l.entries || []).find(e => e.exId === exId)).find(Boolean); const lastW = lastE && HZ.workEntry(lastE);
       const T = (lastE && lastE.targetReps) || 5;
       const draft = (A.planDraft = A.planDraft || {})[c.id + exId] || (A.planDraft[c.id + exId] = { type, load: sg.next ?? null, reps: sg.reps || "" });

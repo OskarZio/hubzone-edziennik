@@ -190,6 +190,10 @@ function stationCard(w, st, exBase, label, d, isSuper){
   d.mode = d.mode || {};
   let mode = HZ.modeFor(exBase, d.mode[st.id]);
   if (d.mode[st.id] && d.mode[st.id] !== mode){ d.mode[st.id] = mode; d.st[st.id] = null; }   // trainer turned that mode off
+  // trainer's plan uses the other mode (e.g. band -> weight): switch once, while nothing is typed in yet
+  const pl = C.plan && C.plan[exBase.id]; d.planSeen = d.planSeen || {};
+  if (pl && pl.type && pl.type !== mode && !d.planSeen[st.id] && HZ.modesOf(exBase).includes(pl.type) && HZ.trainerTip(C.plan, C.logs, exBase.id, pl.type)
+      && !(d.st[st.id] || []).some(x => x.reps != null)){ mode = pl.type; d.mode[st.id] = mode; d.st[st.id] = null; d.planSeen[st.id] = true; saveDrafts(); }
   const ex = { ...exBase, type:mode };
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
   const tRir = rirOn() ? HZ.targetRir(w, st) : null;
