@@ -246,9 +246,9 @@ HZ.loadConfig = async () => {
   S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false,
     features:{ rir:"off", acc:"all", pain:"off", approve:false, approveSince:null, requireStart:false, holo:true, ...(d.features || {}) }, guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
 };
-/* client features: "off" | "adv" (only clients marked as advanced) | "all"; the trainer always sees everything */
+/* client features: "off" | "adv" (only clients marked as advanced) | "all"; the trainer's client view shows exactly what clients see */
 HZ.feat = (name, profile) => { const v = ((S.config && S.config.features) || {})[name];
-  if (profile && profile.is_admin) return true; return v === "all" || v === true || (v === "adv" && !!(profile && profile.advanced)); };
+  return v === "all" || v === true || (v === "adv" && !!(profile && profile.advanced)); };
 HZ.loadWorkouts = async () => { S.workouts = list(await db.collection("workouts").get()); };
 HZ.dbError = (e) => {
   const c = (e && e.code) || "";
