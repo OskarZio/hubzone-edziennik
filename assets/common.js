@@ -28,7 +28,7 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
@@ -68,11 +68,13 @@ HZ.api = {
     const u = auth.currentUser; if (!u || u.uid !== uid) throw { code:"auth/no-current-user" };
     if (!u.isAnonymous) await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
     await delWhere("user_id", uid);
+    for (const d of (await db.collection("drafts").where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {});
     await db.doc("ranking/" + uid).delete().catch(() => {});
     await db.doc("users/" + uid).delete();
     await u.delete().catch(e => { if (!u.isAnonymous) throw e; return auth.signOut(); });
   }),
-  deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
+  deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid);
+    for (const c of ["drafts", "approvals", "technique"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
   updateProfile: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
   users: () => wrap(async () => (await db.collection("users").get()).docs.map(d => asProfile(d.id, d.data()))),
@@ -97,6 +99,21 @@ HZ.api = {
     await db.doc("users/" + id).set(doc); return asProfile(id, doc); }),
   renameManualClient: (id, name) => wrap(() => db.doc("users/" + id).update({ name })),
   deleteManualClient: id => wrap(async () => { await delWhere("user_id", id); await db.doc("ranking/" + id).delete().catch(() => {}); await db.doc("users/" + id).delete(); }),
+  setFeatures: patch => wrap(() => db.doc("config/library").set({ features:patch }, { merge:true })),
+  setAdvanced: (uid, on) => wrap(() => db.doc("users/" + uid).update({ advanced:!!on })),
+  setWorkoutOpen: (id, open) => wrap(() => db.doc("workouts/" + id).update(open ? { open:true, openedAt:new Date().toISOString() } : { open:false, closedAt:new Date().toISOString() })),
+  /* records approved / rejected by the trainer (client can read own) */
+  approvalsOf: uid => wrap(async () => list(await db.collection("approvals").where("user_id", "==", uid).get())),
+  allApprovals: () => wrap(async () => list(await db.collection("approvals").get())),
+  setApproval: (logId, userId, stationId, val) => wrap(() => db.doc("approvals/" + logId).set({ user_id:userId, items:{ [stationId]:val }, at:new Date().toISOString() }, { merge:true })),
+  /* technique notes: trainer only */
+  techniqueFor: wid => wrap(async () => list(await db.collection("technique").where("workout_id", "==", wid).get())),
+  techniqueOf: uid => wrap(async () => list(await db.collection("technique").where("user_id", "==", uid).get())),
+  setTechnique: (logId, userId, wid, stationId, val) => wrap(() => db.doc("technique/" + logId).set({ user_id:userId, workout_id:wid, items:{ [stationId]:val } }, { merge:true })),
+  /* unsent drafts, so the trainer sees results even if someone forgot to send */
+  saveDraft: row => wrap(() => db.doc("drafts/" + row.user_id + "_" + row.workout_id).set(row)),
+  deleteDraft: (uid, wid) => wrap(() => db.doc("drafts/" + uid + "_" + wid).delete()),
+  draftsForWorkout: wid => wrap(async () => list(await db.collection("drafts").where("workout_id", "==", wid).get())),
   getClub: () => wrap(async () => { const s = await db.doc("settings/club").get(); return s.exists ? (s.data().joinCode || null) : null; }),
   setClub: code => wrap(() => db.doc("settings/club").set({ joinCode:code })),
   saveWorkout: row => wrap(async () => { const { id, ...body } = row; await db.doc("workouts/" + id).set(body); return row; }),
@@ -226,8 +243,12 @@ HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(lo
 /* ---------- data ---------- */
 HZ.loadConfig = async () => {
   const s = await db.doc("config/library").get(); const d = s.exists ? s.data() : {};
-  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false, guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
+  S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false,
+    features:{ rir:"off", acc:"all", pain:"off", approve:false, approveSince:null, requireStart:false, holo:true, ...(d.features || {}) }, guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
 };
+/* client features: "off" | "adv" (only clients marked as advanced) | "all"; the trainer always sees everything */
+HZ.feat = (name, profile) => { const v = ((S.config && S.config.features) || {})[name];
+  if (profile && profile.is_admin) return true; return v === "all" || v === true || (v === "adv" && !!(profile && profile.advanced)); };
 HZ.loadWorkouts = async () => { S.workouts = list(await db.collection("workouts").get()); };
 HZ.dbError = (e) => {
   const c = (e && e.code) || "";
@@ -308,6 +329,7 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
   const goal = targetRir != null ? ` Cel na dziś: RIR ${targetRir}.` : "";
   if (!h.length) return { kind:"first", title:"Pierwszy raz w tym trybie", text: targetRir != null ? `Dobierz obciążenie tak, żeby na końcu serii zostało ${targetRir} powt. zapasu (RIR ${targetRir}).` : "Dobierz obciążenie, przy którym na końcu serii zostają ci 2–3 powtórzenia zapasu (RIR 2–3).", next:null };
   const { log, entry } = h[0]; const load = HZ.workLoad(entry); const { hit, minRir } = HZ.judge(entry);
+  if (log.pain) return { kind:"down", title:"Ostatnio coś bolało", text:`Po treningu ${fmtDate(log.date)} zgłoszono: „${log.pain}”. Zmniejsz ciężar albo zapytaj trenera, zanim dołożysz.`, next:load, base: type === "kg" ? (load || 0) : null };
   const setTxt = entry.sets.map(s => type === "kg" ? `${fmtKg(s.load)}×${s.reps ?? "–"}` : type === "band" ? `${bandName(s.load)}×${s.reps ?? "–"}` : `${s.reps ?? "–"}`).join(" · ");
   const last = `Ostatnio (${fmtDate(log.date)}): ${setTxt}` + (minRir != null ? `, najniższy RIR ${minRir}` : "");
   const tiredNote = log.fatigue != null && log.fatigue >= 9 ? ` Zmęczenie było wtedy wysokie (${log.fatigue}/10), więc dołóż tylko, jeśli dziś czujesz się lepiej.` : "";
@@ -334,7 +356,7 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
       const base = load || 0, rec = small ? lo : hi;
       const options = (lo === hi ? [lo] : [lo, hi]).map(a => ({ load: base + a, label:`+${fmtKg(a)} → ${fmtKg(base + a)} kg`, rec: a === rec }));
       return { kind:"up", title: lo === hi ? `Dołóż ${fmtKg(lo)} kg` : `Dołóż ${fmtKg(lo)}–${fmtKg(hi)} kg`,
-        text:`${last}. Polecam +${fmtKg(rec)} kg (${minRir == null ? "nie wpisano RIR" : small ? "mały zapas" : "był zapas"}). Po przeskoku celuj w ${reps} powt. w serii.` + goal + tiredNote, next: base + rec, options, reps, base };
+        text:`${last}. Polecam +${fmtKg(rec)} kg (${minRir == null ? (HZ.rirOn === false ? "wszystkie powtórzenia zrobione" : "nie wpisano RIR") : small ? "mały zapas" : "był zapas"}). Po przeskoku celuj w ${reps} powt. w serii.` + goal + tiredNote, next: base + rec, options, reps, base };
     }
     if (type === "band"){
       const i = bandIdx(load);
@@ -399,7 +421,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
           setTimeout(() => onChange(true), 0); }, `${keyPrefix}-l${i}`)),
       el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type, ex) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
-      s.warmup ? (warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? el("span", { class:"wnote", text:ex.warmLabel }) : null) : HZ.rirPicker(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`));
+      s.warmup ? (warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? el("span", { class:"wnote", text:ex.warmLabel }) : null) : (opts.noRir ? null : HZ.rirPicker(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`)));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
@@ -412,7 +434,11 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     nWarm && !opts.noWarmup ? el("button", { type:"button", class:"ghost", onclick(){ sets.splice(nWarm - 1, 1); onChange(true); }, text:"− wstępna" }) : null,
     el("button", { type:"button", class:"ghost", onclick(){ const last = sets.filter(s => !s.warmup).pop(); sets.push({ load: last ? last.load : null, reps:null, rir:null }); onChange(true); }, text:"+ seria" }),
     nWork > 1 ? el("button", { type:"button", class:"ghost", onclick(){ sets.pop(); onChange(true); }, text:"− seria" }) : null);
-  return el("div", { class:"sets" }, head, rows, ctl);
+  const body = []; rows.forEach((r, i) => {
+    if (nWarm && i === 0) body.push(el("div", { class:"setsec warm", text:"Rozgrzewka – serie wstępne (W1, W2…)" }));
+    if (nWarm && i === nWarm) body.push(el("div", { class:"setsec", text:"Serie robocze – te się liczą" }));
+    body.push(r); });
+  return el("div", { class:"sets" + (opts.noRir ? " norir" : "") }, head, body, ctl);
 };
 HZ.tipBox = (sg, onPick, current) => el("div", { class:"tip " + sg.kind }, el("span", { class:"ic", "aria-hidden":"true", text:{ up:"↑", hold:"=", down:"↓", first:"•" }[sg.kind] }),
   el("div", { class:"stack", style:"gap:6px" }, el("div", {}, el("b", { text:sg.title }), el("span", { text:sg.text })),
@@ -581,45 +607,77 @@ HZ.lineChart = (pts, { ticks, fmt }) => {
    - general (points): rewards showing up — 10 per group workout, +5 for each Friday that continues a streak. Weights don't matter.
    - strength: 5 per personal record + average % progress of top working weight. */
 HZ.POINTS = { workout:10, streak:5, pr:5 };
-HZ.computeStats = (logs) => {
+/* Postęp points (balanced, so steady work counts even without a record every week):
+   weight record 5 (only credible or trainer-approved), rep record at the best weight 2, training with the plan done 3, + progress % (max 30) */
+HZ.PTS = { pr:5, repPr:2, plan:3, progressCap:30 };
+/* a weight record is credible when the jump over the previous best is small; bigger jumps wait for the trainer */
+HZ.recordLimit = (ex, prev) => Math.max(2 * HZ.incRange(ex || {})[1], prev * 0.1);
+HZ.apprOpts = () => { const f = (S.config && S.config.features) || {}; return { approveSince: f.approve ? (f.approveSince || "0000") : null }; };
+HZ.computeStats = (logs, appr = {}, opts = {}) => {
+  const from = opts.from || null, inRange = d => !from || (d || "") >= from;
   const sorted = [...logs].sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.saved_at||"").localeCompare(b.saved_at||""));
-  const attended = new Set(logs.filter(l => l.workout_id && !l.own).map(l => l.workout_id));
-  const today = HZ.todayISO(); const past = HZ.sortedWorkouts().filter(w => w.date <= today);
-  // attendance, streaks, general points
-  let run = 0, longest = 0, bonus = 0, prevAttended = false, firstIdx = -1;
-  past.forEach((w, i) => {
-    const here = attended.has(w.id);
-    if (here){ if (firstIdx < 0) firstIdx = i; if (prevAttended) bonus += HZ.POINTS.streak; run++; longest = Math.max(longest, run); }
-    else if (w.date !== today) run = 0;
-    prevAttended = here || (w.date === today && prevAttended);
-  });
+  const attendedAll = new Set(logs.filter(l => l.workout_id && !l.own).map(l => l.workout_id));
+  const attended = new Set(logs.filter(l => l.workout_id && !l.own && inRange(l.date)).map(l => l.workout_id));
+  const today = HZ.todayISO(); const pastAll = HZ.sortedWorkouts().filter(w => w.date <= today); const past = pastAll.filter(w => inRange(w.date));
+  // general points: attendance + streak bonus (inside the period)
+  let bonus = 0, prevAttended = false, firstIdx = -1;
+  past.forEach((w, i) => { const here = attended.has(w.id); if (here){ if (firstIdx < 0) firstIdx = i; if (prevAttended) bonus += HZ.POINTS.streak; }
+    prevAttended = here || (w.date === today && prevAttended); });
+  let run = 0, longest = 0;
+  pastAll.forEach(w => { if (attendedAll.has(w.id)){ run++; longest = Math.max(longest, run); } else if (w.date !== today) run = 0; });
   let streak = 0;
-  for (let i = past.length - 1; i >= 0; i--){ if (attended.has(past[i].id)) streak++; else if (past[i].date === today) continue; else break; }
+  for (let i = pastAll.length - 1; i >= 0; i--){ if (attendedAll.has(pastAll[i].id)) streak++; else if (pastAll[i].date === today) continue; else break; }
   const pastAttended = past.filter(w => attended.has(w.id)).length;
   const possible = firstIdx < 0 ? 0 : past.length - firstIdx - (past.length && past[past.length-1].date === today && !attended.has(past[past.length-1].id) ? 1 : 0);
   const attendancePct = possible > 0 ? Math.round(pastAttended / possible * 100) : null;
-  // records & progress (working sets only)
-  const best = {}, span = {}, records = {}, bests = {}; let prs = 0, volume = 0;
-  for (const l of sorted) for (const e0 of (l.entries || [])){
-    const e = HZ.workEntry(e0); if (!e) continue;
-    const t = e.type || "kg", k = e.exId + "|" + t; let v, label;
-    if (t === "kg"){ v = Math.max(...e.sets.map(s => Number(s.load) || 0)); const top = e.sets.filter(s => (Number(s.load) || 0) === v);
-      label = `${HZ.fmtKg(v)} kg × ${Math.max(...top.map(s => s.reps || 0))}`; volume += e.sets.reduce((a,s) => a + (Number(s.load) || 0) * (s.reps || 0), 0); }
-    else if (t === "band"){ const ld = HZ.workLoad(e); v = ld === "none" ? S.config.bands.length : HZ.bandIdx(ld); if (v < 0) continue; label = (ld === "none" ? "bez gumy" : HZ.bandFull(ld)) + ` × ${Math.max(...e.sets.map(s => s.reps || 0))}`; }
-    else { v = e.sets.reduce((a,s) => a + (s.reps || 0), 0); label = `${v} powt. łącznie`; }
-    if (k in best){ if (v > best[k]){ prs++; best[k] = v; records[k] = { exId:e.exId, type:t, name:e.exName, label, date:l.date }; } }
-    else { best[k] = v; records[k] = { exId:e.exId, type:t, name:e.exName, label, date:l.date }; }
-    if (t === "kg" && v > 0) bests[e.exId] = Math.max(bests[e.exId] || 0, v);
-    if (t === "kg" && v > 0) span[k] = span[k] ? { first:span[k].first, last:v, n:span[k].n + 1 } : { first:v, last:v, n:1 };
+  // records (working sets only); a weight record counts when credible or approved
+  const best = {}, bestReps = {}, first = {}, records = {}, bests = {}, pending = [];
+  let prs = 0, repPrs = 0, volume = 0, strength = 0;
+  const since = opts.approveSince !== undefined ? opts.approveSince : HZ.apprOpts().approveSince;
+  for (const l of sorted){
+    const here = inRange(l.date); let hits = 0, planned = 0;
+    for (const e0 of (l.entries || [])){
+      const e = HZ.workEntry(e0); if (!e) continue;
+      const done = e.sets.filter(x => (x.reps || 0) > 0); if (!done.length) continue;
+      planned++; if (HZ.judge(e).hit) hits++;
+      const t = e.type || "kg", k = e.exId + "|" + t; let v, reps, label;
+      if (t === "kg"){ v = Math.max(...done.map(x => Number(x.load) || 0)); reps = Math.max(...done.filter(x => (Number(x.load) || 0) === v).map(x => x.reps || 0));
+        label = (v === 0 ? "bez ciężaru" : `${HZ.fmtKg(v)} kg`) + ` × ${reps}`; if (here) volume += done.reduce((a,x) => a + (Number(x.load) || 0) * (x.reps || 0), 0); }
+      else if (t === "band"){ const ld = HZ.workLoad(e); v = ld === "none" ? S.config.bands.length : HZ.bandIdx(ld); if (v < 0) continue; reps = Math.max(...done.map(x => x.reps || 0)); label = (ld === "none" ? "bez gumy" : HZ.bandFull(ld)) + ` × ${reps}`; }
+      else { v = done.reduce((a,x) => a + (x.reps || 0), 0); reps = 0; label = `${v} powt. łącznie`; }
+      const rec = { exId:e.exId, type:t, name:e.exName, label, date:l.date };
+      if (!(k in best)){ best[k] = v; bestReps[k] = reps; first[k] = v; records[k] = rec; }
+      else if (v > best[k]){
+        const a = ((appr[l.id] || {}).items || {})[e.stationId];
+        const needs = t === "kg" && a !== "ok" && (a === "no" || (since && (l.date || "") >= since) || v - best[k] > HZ.recordLimit(HZ.exById(e.exId), best[k]));
+        if (needs){ if (a !== "no") pending.push({ logId:l.id, stationId:e.stationId, exId:e.exId, name:e.exName, date:l.date, from:best[k], to:v, reps,
+            reason: v - best[k] > HZ.recordLimit(HZ.exById(e.exId), best[k]) ? "duży skok" : "do zatwierdzenia" }); continue; }
+        prs++; best[k] = v; bestReps[k] = reps; records[k] = rec; if (here) strength += HZ.PTS.pr;
+      }
+      else if (v === best[k] && reps > bestReps[k] && t !== "bw"){ bestReps[k] = reps; repPrs++; records[k] = rec; if (here) strength += HZ.PTS.repPr; }
+      if (t === "kg" && best[k] > 0) bests[e.exId] = Math.max(bests[e.exId] || 0, best[k]);
+    }
+    if (here && !l.own && planned && hits / planned >= 0.8) strength += HZ.PTS.plan;
   }
-  const pct = Object.values(span).filter(x => x.n > 1).map(x => (x.last - x.first) / x.first * 100);
-  const progress = pct.length ? Math.round(pct.reduce((a,b) => a + b, 0) / pct.length) : null;
+  const pct = Object.keys(first).filter(k => k.endsWith("|kg") && first[k] > 0 && best[k] !== first[k]).map(k => (best[k] - first[k]) / first[k] * 100);
+  const nKg = Object.keys(first).filter(k => k.endsWith("|kg") && first[k] > 0).length;
+  const progress = nKg && pct.length ? Math.round(pct.reduce((a,b) => a + b, 0) / nKg) : (nKg ? 0 : null);
+  if (!from) strength += Math.max(0, Math.min(HZ.PTS.progressCap, progress || 0));
   return {
-    workouts:attended.size, streak, longest, prs, progress, volume: Math.round(volume),
-    points: attended.size * HZ.POINTS.workout + bonus,
-    strength: prs * HZ.POINTS.pr + Math.max(0, progress || 0),
-    attendancePct, records: Object.values(records), bests
+    workouts:attended.size, streak, longest, prs, repPrs, progress, volume: Math.round(volume),
+    points: attended.size * HZ.POINTS.workout + bonus, strength,
+    attendancePct, records: Object.values(records), bests, pending
   };
+};
+/* entries the trainer rejected don't drive the next suggestion */
+HZ.dropRejected = (logs, appr = {}) => logs.map(l => { const it = (appr[l.id] || {}).items; if (!it) return l;
+  const entries = (l.entries || []).filter(e => it[e.stationId] !== "no"); return entries.length === (l.entries || []).length ? l : { ...l, entries }; });
+HZ.monthKey = () => HZ.todayISO().slice(0, 7);
+HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
+/* full ranking row: all-time + this month */
+HZ.rankFull = (logs, appr, bw) => {
+  const all = HZ.computeStats(logs, appr), k = HZ.monthKey(), m = HZ.computeStats(logs, appr, { from:k + "-01" });
+  return { ...HZ.rankRow(all, bw), m:{ k, points:m.points, strength:m.strength, workouts:m.workouts, prs:m.prs } };
 };
 /* relative strength: best working weight as % of body weight; bodyweight exercises (pull-ups, dips) count body + added load */
 HZ.isBwExercise = ex => ex ? (ex.bwBased ?? ex.type === "band") : false;
@@ -627,7 +685,7 @@ HZ.relStrength = (bests, bw) => { const out = {}; if (!(bw > 0)) return out;
   for (const [id, kg] of Object.entries(bests || {})){ const ex = HZ.exById(id); out[id] = Math.round((HZ.isBwExercise(ex) ? bw + kg : kg) / bw * 100); }
   return out; };
 /* what goes to the shared ranking: body weight itself never leaves the profile, only the percentages */
-HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw) }; };
+HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, pending, repPrs, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw) }; };
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [
@@ -642,9 +700,34 @@ const RANK_COLS = [
 const BOARDS = [
   { key:"points", label:"Ogólny", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
   { key:"rel", label:"Siła", desc:"Siła względna: największy ciężar roboczy jako % masy ciała, więc 100 kg przy 100 kg wagi to 100%, a 80 kg przy 60 kg to 133%. Domyślnie średnia z bojów głównych. Przy podciąganiu i dipach liczy się masa ciała + dociążenie. Samej masy ciała nikt nie widzi." },
-  { key:"strength", label:"Postęp", desc:`Za postęp: ${HZ.POINTS.pr} pkt za każdy rekord osobisty + średni progres największego ciężaru w %. Każdy porównywany jest sam ze sobą.` }
+  { key:"strength", label:"Postęp", desc:`Każdy porównywany sam ze sobą: ${HZ.PTS.plan} pkt za trening z wykonanym planem, ${HZ.PTS.repPr} pkt za rekord powtórzeń, ${HZ.PTS.pr} pkt za rekord ciężaru (tylko wiarygodny skok albo zatwierdzony przez trenera) + progres w % (maks. ${HZ.PTS.progressCap}).` }
 ];
-let rankSort = "points", relEx = null;
+let rankSort = "points", relEx = null, rankPeriod = "month";
+const MONTH_KEYS = ["points", "strength", "workouts", "prs"];
+/* motivating line for the participant (monthly general board) */
+HZ.myRankMessage = (rows, meId) => {
+  const k = HZ.monthKey(), pts = r => r.m && r.m.k === k ? (r.m.points || 0) : 0;
+  const vis = rows.filter(r => !r.hidden); const me = vis.find(r => r.id === meId); if (!me) return null;
+  const my = pts(me), mon = HZ.monthName(k).split(" ")[0];
+  if (!my) return { kind:"start", text:`Nowy miesiąc, nowa tabela! Pierwszy trening w ${mon === "luty" ? "lutym" : "tym miesiącu"} to od razu ${HZ.POINTS.workout} pkt.` };
+  const higher = [...new Set(vis.map(pts).filter(v => v > my))].sort((a,b) => a - b);
+  const place = 1 + vis.filter(r => pts(r) > my).length, tied = vis.filter(r => r.id !== meId && pts(r) === my).length;
+  if (place === 1) return { kind:"p1", text: tied ? `🏆 Dzielisz 1. miejsce w tym miesiącu! Jeden trening więcej i jesteś sam/-a na szczycie.` : `🏆 Jesteś nr 1 w tym miesiącu! Tak trzymaj – reszta goni.` };
+  const gap = higher[0] - my;
+  if (place <= 3) return { kind:"p" + place, text:`${place === 2 ? "🥈" : "🥉"} Jesteś na podium – ${place}. miejsce! Do miejsca wyżej brakuje Ci ${gap} pkt${gap <= HZ.POINTS.workout ? " – to jeden trening" : ""}.` };
+  const podium = [...new Set(vis.map(pts))].sort((a,b) => b - a)[2]; const toPod = podium != null ? podium - my : gap;
+  return { kind:"go", text:`💪 ${place}. miejsce w tym miesiącu. Do podium brakuje Ci ${toPod} pkt – każdy trening to ${HZ.POINTS.workout} pkt, a seria z rzędu daje bonus.` };
+};
+HZ.personalMessage = logs => {
+  const st = HZ.computeStats(logs); if (!logs.length) return null;
+  if (st.streak >= 3) return { kind:"go", text:`🔥 ${st.streak} treningi z rzędu – tak trzymaj!` };
+  if (st.prs + st.repPrs > 0 && st.progress > 0) return { kind:"go", text:`💪 Od startu średnio +${st.progress}% w Twoich ćwiczeniach. Dobra robota!` };
+  return { kind:"go", text: logs.length === 1 ? "👏 Dobry start! Każdy kolejny trening widać w Postępach." : `👏 Masz już ${logs.length} treningów. Regularność robi robotę!` };
+};
+HZ.motivationBox = msg => msg ? el("div", { class:"motiv " + msg.kind }, el("span", { text:msg.text })) : null;
+/* gold / silver / bronze sticker; holographic shine is pure CSS (.holo) and can be switched off by the trainer */
+HZ.medal = (place, small) => el("span", { class:`medal m${place}${small ? " sm" : ""}`, title:["","Złoto","Srebro","Brąz"][place], text:String(place) });
+HZ.applyHolo = () => document.documentElement.classList.toggle("no-holo", !(S.config && S.config.features && S.config.features.holo !== false));
 HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const vis = rows.filter(r => !r.hidden || opts.showHidden);
   if (!vis.length) return [el("div", { class:"empty" }, el("h3", { text:"Ranking jest jeszcze pusty" }), el("p", { class:"small", text:"Pojawi się, gdy uczestnicy zapiszą pierwsze treningi." }))];
@@ -662,22 +745,28 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const relCol = ["rel", "% MC", r => relOf(r) != null ? relOf(r) + "%" : "–"];
   const kgCol = ["kg", relEx === "main" ? "Suma kg" : "Ciężar", r => kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : "–"];
   const strengthView = rankSort === "rel" || rankSort === "kg";
-  const cols = strengthView ? [relCol, kgCol, ...RANK_COLS] : RANK_COLS;
-  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (r[rankSort] == null ? -Infinity : r[rankSort]);
-  const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((b.points||0) - (a.points||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
+  const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
+  const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (r.m[k] || 0) : 0) : r[k];
+  const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l]) => [k, l, r => field(r, k) ?? 0]) : RANK_COLS;
+  const cols = strengthView ? [relCol, kgCol, ...RANK_COLS] : baseCols;
+  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (field(r, rankSort) == null ? -Infinity : field(r, rankSort));
+  const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((field(b, "points")||0) - (field(a, "points")||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
   const placed = sorted.map((r, i) => { if (val(r) !== prev){ place = i + 1; prev = val(r); } return { r, place: val(r) === -Infinity ? "–" : place }; });
+  if (!cols.some(c => c[0] === rankSort)) rankSort = "points";
   const col = cols.find(c => c[0] === rankSort) || cols[0];
   const board = BOARDS.find(b => b.key === (rankSort === "kg" ? "rel" : rankSort));
   const podiumRows = placed.filter(x => x.place !== "–").slice(0, 3);
   const podium = podiumRows.length ? el("div", { class:"podium" }, podiumRows.map(({ r, place }) => el("div", { class:"pod p" + place + (r.id === meId ? " me" : "") },
-    el("span", { class:"pl", text: place + "." }), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") + (rankSort === "kg" && relOf(r) != null ? ` · ${relOf(r)}%` : rankSort === "rel" && kgOf(r) != null ? ` · ${HZ.fmtKg(kgOf(r))} kg` : "") }))))
+    HZ.medal(place), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") + (rankSort === "kg" && relOf(r) != null ? ` · ${relOf(r)}%` : rankSort === "rel" && kgOf(r) != null ? ` · ${HZ.fmtKg(kgOf(r))} kg` : "") }))))
     : el("p", { class:"small muted", text: rankSort === "rel" ? "Nikt jeszcze nie ma wyniku w tym ćwiczeniu z wpisaną masą ciała." : "Brak wyników." });
   const me = placed.find(x => x.r.id === meId);
   const exSel = strengthView && relIds.length ? el("select", { id:"rel-ex", "aria-label":"Ćwiczenie", onchange(e){ relEx = e.target.value; rerender(); } },
     mainIds.size ? el("option", { value:"main", text:"Boje główne (średnia)" }) : null, relIds.map(id => el("option", { value:id, text:HZ.exById(id).name }))) : null;
   if (exSel) exSel.value = relEx;
-  return [el("div", { class:"card" },
+  return [opts.message ? HZ.motivationBox(opts.message) : null, el("div", { class:"card" },
+      strengthView ? null : el("div", { class:"modes", role:"group", "aria-label":"Okres" },
+        [["month", `Ten miesiąc (${HZ.monthName(mk).split(" ")[0]})`], ["all", "Od początku"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankPeriod === k), onclick(){ rankPeriod = k; rerender(); }, text:t }))),
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
         BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && rankSort === "kg")), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
       el("p", { class:"small muted", text: board ? board.desc + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
@@ -692,7 +781,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
         el("thead", {}, el("tr", {}, el("th", { text:"#" }), el("th", { text:"Imię" }),
           cols.map(([k, label]) => el("th", { class: k === rankSort ? "on" : null }, el("button", { type:"button", class:"thsort", onclick(){ rankSort = k; rerender(); }, text: label + (k === rankSort ? " ↓" : "") }))))),
         el("tbody", {}, placed.map(({ r, place }) => el("tr", { class: r.id === meId ? "me" : null },
-          el("td", { text:place }), el("td", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }),
+          el("td", {}, typeof place === "number" && place <= 3 ? HZ.medal(place, true) : String(place)), el("td", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }),
           cols.map(([k,, f]) => el("td", { class: k === rankSort ? "on" : null, text:f(r) }))))))),
       el("p", { class:"small muted", text:"Seria: piątki z rzędu. Rekord: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i sposobie wykonania. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: ciężar × powtórzenia w seriach roboczych. % MC: ciężar jako procent masy ciała. Ciężar / Suma kg: największy ciężar roboczy (suma z bojów głównych)." }))];
 };
@@ -727,8 +816,8 @@ HZ.liftsCard = (logs, title = "Ile więcej podnosisz") => {
     main.length ? el("div", { class:"stack", style:"gap:6px" }, el("h3", { text:"Boje" }), el("div", { class:"list" }, main.map(line))) : null,
     acc.length ? el("details", { open: main.length ? null : true }, el("summary", { text:`Akcesoria (${acc.length})` }), el("div", { class:"list", style:"margin-top:6px" }, acc.map(line))) : null);
 };
-HZ.personalStats = (logs, title) => {
-  const st = HZ.computeStats(logs);
+HZ.personalStats = (logs, title, appr = {}) => {
+  const st = HZ.computeStats(logs, appr);
   const tile = (label, value, sub) => el("div", { class:"stat" }, el("span", { class:"eyebrow", text:label }), el("span", { class:"v", text:value }), sub ? el("span", { class:"small muted", text:sub }) : null);
   const recs = [...st.records].sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl"));
   return el("div", { class:"card" },
@@ -736,10 +825,12 @@ HZ.personalStats = (logs, title) => {
     el("div", { class:"grid3" },
       tile("Treningi z grupą", st.workouts, st.attendancePct == null ? null : `${st.attendancePct}% obecności`),
       tile("Seria", st.streak, `najdłuższa: ${st.longest}`),
-      tile("Rekordy", st.prs, st.progress == null ? null : `progres ${st.progress > 0 ? "+" : ""}${st.progress}%`),
+      tile("Rekordy", st.prs, (st.repPrs ? `+${st.repPrs} w powt. · ` : "") + (st.progress == null ? "" : `progres ${st.progress > 0 ? "+" : ""}${st.progress}%`) || null),
       tile("Pkt ogólne", st.points),
       tile("Pkt siłowe", st.strength),
       tile("Tonaż", fmtVol(st.volume))),
+    st.pending.length ? el("div", { class:"notice small" }, el("b", { text:"Czeka na zatwierdzenie trenera: " }),
+      st.pending.map(x => `${x.name} ${x.to === 0 ? "bez ciężaru" : HZ.fmtKg(x.to) + " kg"} × ${x.reps} (${HZ.fmtDate(x.date)})`).join(", "), ". Po zatwierdzeniu wejdzie do rekordów i rankingu.") : null,
     recs.length ? el("div", { class:"stack", style:"gap:4px" }, el("h3", { text:"Rekordy osobiste" }),
       el("div", { class:"list" }, recs.map(r => el("div", { class:"row between", style:"flex-wrap:nowrap" },
         el("span", { style:"min-width:0", text: r.name + (st.records.filter(x => x.exId === r.exId).length > 1 ? ` (${HZ.MODE_LABEL[r.type].toLowerCase()})` : "") }),

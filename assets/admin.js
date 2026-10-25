@@ -26,8 +26,9 @@ async function loadAll(){
   render();
 }
 async function loadClients(){
-  const [pr, lg] = await Promise.all([HZ.api.users(), HZ.api.allLogs()]);
+  const [pr, lg, ap] = await Promise.all([HZ.api.users(), HZ.api.allLogs(), HZ.api.allApprovals()]);
   if (pr.error) throw pr.error; if (lg.error) throw lg.error;
+  A.appr = Object.fromEntries(((ap && ap.data) || []).map(a => [a.id, a])); HZ.applyHolo();
   A.admins = pr.data.filter(p => p.is_admin);
   A.clients = pr.data.filter(p => !p.is_admin).sort((a,b) => (a.name || "").localeCompare(b.name || "", "pl"));
   A.stats = {}; A.allLogs = lg.data;
@@ -48,7 +49,7 @@ function view(){
   const warn = !A.joinCode ? el("div", { class:"notice" }, "Kod klubu nie jest ustawiony, więc konto może założyć każdy, kto zna link. ",
     el("button", { class:"link", onclick(){ A.tab = "settings"; HZ.LS.set("hz-admin-tab", "settings"); render(); }, text:"Ustaw kod" })) : null;
   if (A.showQr) return [qrScreen()];
-  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body(), HZ.footer()];
+  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results", pendingAll().length ? `Wyniki (${pendingAll().length})` : "Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body(), HZ.footer()];
 }
 function header(){
   return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
@@ -72,7 +73,7 @@ function body(){
         for (const c of A.clients.filter(c => consent.has(c.id))){
           const logs = (A.allLogs || []).filter(l => l.user_id === c.id); if (!logs.length) continue;
           const old = byId.get(c.id) || {};
-          const row = { name:c.name || "", ...HZ.rankRow(HZ.computeStats(logs), c.consent.health ? c.bodyweight : null), hidden: old.hidden === true };
+          const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null), hidden: old.hidden === true };
           const { updatedAt, id, ...prev } = old;
           if (JSON.stringify(prev) === JSON.stringify(row)) continue;
           const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() });
@@ -198,7 +199,7 @@ function settingsView(){
       el("button", { async onclick(){ const n = Math.max(0, Math.min(20, parseInt(limIn.value, 10) || 0));
         const { error } = await HZ.api.setGuestLimit(n); if (error){ toast(HZ.dbError(error)); return; }
         S.config.guestLimit = n; toast(n ? `Gość musi założyć konto po ${n} ${HZ.plural(n, "treningu", "treningach", "treningach")}` : "Bez limitu dla gości"); render(); }, text:"Zapisz" })));
-  return [exCard, bandCard, save, codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
+  return [exCard, bandCard, save, featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type: e.modes === "kg" ? "kg" : e.modes === "band" ? "band" : e.type, modes: e.modes === "kg" || e.modes === "band" ? e.modes : "both", incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
@@ -222,7 +223,7 @@ function workoutsView(){
   ws.forEach(w => out.push(el("div", { class:"card" },
     el("div", { class:"row between" },
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date, true)}` }), el("h3", { text:w.title || "Trening stacyjny" })),
-      el("div", { class:"row" }, el("button", { onclick(){ A.editW = HZ.clone(w); render(); }, text:"Edytuj" }),
+      el("div", { class:"row" }, S.config.features.requireStart ? openBtn(w) : null, el("button", { onclick(){ A.editW = HZ.clone(w); render(); }, text:"Edytuj" }),
         el("button", { onclick(){ A.tab = "results"; A.res = { wid:w.id, rows:null, loading:false }; HZ.LS.set("hz-admin-tab", "results"); render(); }, text:"Wyniki" }))),
     el("div", { class:"chips" }, HZ.orderStations(w.stations || []).map(s => { const ex = HZ.exById(s.exId); const lb = HZ.stationLabels(HZ.orderStations(w.stations || []))[s.id]; return el("span", { class:"chip" + (HZ.secOf(s) === "main" ? " main" : ""), text:`${lb}. ${ex ? ex.name : "?"} ${s.warmup ? s.warmup + "W + " : ""}${s.sets}×${s.reps}` }); })),
     A.confirmDel === w.id
@@ -275,7 +276,7 @@ function workoutEditor(){
     el("div", { class:"row" },
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jeden bój albo stację."); return; }
-        const row = { id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(), rir: w.rir ?? null,
+        const row = { ...(w.open != null ? { open:w.open } : {}), ...(w.openedAt ? { openedAt:w.openedAt } : {}), ...(w.closedAt ? { closedAt:w.closedAt } : {}), id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(), rir: w.rir ?? null,
           stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, rir: s.rir ?? null, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
@@ -291,11 +292,13 @@ async function loadResults(wid){
   A.res = { wid, rows:null, loading:true }; render();
   const { data, error } = await HZ.api.logsForWorkout(wid);
   if (error){ toast(HZ.dbError(error)); A.res = { wid, rows:[], loading:false }; render(); return; }
+  const [dr, tq] = await Promise.all([HZ.api.draftsForWorkout(wid), HZ.api.techniqueFor(wid)]);
+  A.res.drafts = new Map(((dr && dr.data) || []).map(x => [x.user_id, x])); A.res.tech = Object.fromEntries(((tq && tq.data) || []).map(x => [x.id, x.items || {}]));
   const byUser = new Map(data.map(l => [l.user_id, l]));
   const rows = A.clients.map(c => ({ client:c, log:byUser.get(c.id) || null }));
   for (const l of data) if (!A.clients.some(c => c.id === l.user_id)) rows.push({ client:{ id:l.user_id, name:"(trener)" }, log:l });
   rows.sort((a,b) => (b.log ? 1 : 0) - (a.log ? 1 : 0) || (a.client.name || "").localeCompare(b.client.name || "", "pl"));
-  A.res = { wid, rows, loading:false }; render();
+  A.res = { ...A.res, wid, rows, loading:false }; render();
 }
 function resultsView(){
   const ws = HZ.sortedWorkouts(); if (!ws.length) return [el("div", { class:"empty", text:"Wyniki pojawią się, gdy dodasz trening i klienci zapiszą serie." })];
@@ -313,19 +316,24 @@ function resultsView(){
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Śr. zmęczenie" }), el("span", { class:"v", text:avg })),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Stacje" }), el("span", { class:"v", text:((ws.find(w => w.id === wid) || {}).stations || []).length })))
       : el("p", { class:"muted", text:"Wczytuję wpisy…" }),
-    el("div", { class:"row" }, el("button", { onclick(){ loadResults(wid); }, text:"Odśwież" }), done.length ? el("button", { onclick(){ exportCsv(wid, done); }, text:"Pobierz CSV" }) : null))];
+    el("div", { class:"row" }, S.config.features.requireStart ? openBtn(ws.find(w => w.id === wid)) : null, el("button", { onclick(){ loadResults(wid); }, text:"Odśwież" }), done.length ? el("button", { onclick(){ exportCsv(wid, done); }, text:"Pobierz CSV" }) : null))];
+  const q = approvalCard(); if (q) out.unshift(q);
   if (rows && !A.clients.length) out.push(el("div", { class:"empty", text:"Nikt jeszcze nie założył konta. Wyślij klientom link do strony głównej i kod klubu." }));
-  if (rows) rows.forEach(({ client, log }) => out.push(el("div", { class:"card" },
+  if (rows) rows.forEach(({ client, log }) => { const draft = A.res.drafts && A.res.drafts.get(client.id); const newer = draft && (!log || (draft.saved_at || "") > (log.saved_at || "")) ? draft : null;
+    out.push(el("div", { class:"card" },
     el("div", { class:"row between" }, el("h3", { text:client.name || client.email || "Klient" }),
       el("div", { class:"row" }, log && log.fatigue != null ? el("span", { class:"chip", text:`Zmęczenie ${log.fatigue}/10` }) : null,
         A.clients.some(c => c.id === client.id) ? el("button", { onclick(){ openEntry(client, wid); }, text: log ? "Edytuj wyniki" : "Wpisz wyniki" }) : null,
         el("button", { class:"ghost", onclick(){ openClient(client.id); }, text:"Historia →" }))),
     client.manual ? el("span", { class:"chip", style:"align-self:flex-start", text:"bez konta · wpisuje trener" }) : null,
-    log ? el("div", { class:"list" }, (log.entries || []).map(e => el("div", { class:"stack", style:"gap:2px" },
+    log && log.pain ? el("span", { class:"chip bad", style:"align-self:flex-start;white-space:normal", text:"Ból: " + log.pain }) : null,
+    log ? el("div", { class:"list" }, (log.entries || []).map(e => el("div", { class:"stack", style:"gap:4px" },
         el("span", { style:"font-weight:600", text:`${e.exName} · cel ${e.targetSets}×${e.targetReps}` }),
-        el("span", { class:"num", style:"font-size:1.05rem", text:HZ.setsText(e) }))))
-      : el("span", { class:"muted small", text:"Brak wpisu z tego treningu." }),
-    log && log.note ? el("p", { class:"small", text:"Notatka / feedback: " + log.note }) : null)));
+        el("span", { class:"num", style:"font-size:1.05rem", text:HZ.setsText(e) }),
+        techPick(log, client, wid, e))))
+      : newer ? null : el("span", { class:"muted small", text:"Brak wpisu z tego treningu." }),
+    newer ? draftBox(newer, client, wid, !!log) : null,
+    log && log.note ? el("p", { class:"small", text:"Notatka / feedback: " + log.note }) : null)); });
   return out;
 }
 function exportCsv(wid, rows){
@@ -355,7 +363,7 @@ async function openEntry(client, wid){
   A.entry = { client, w, d, logs }; render(); window.scrollTo(0, 0);
 }
 function entrySets(w, st, ex, mode, logs){
-  const sg = HZ.suggest(logs, ex.id, mode, ex, w.id, HZ.targetRir(w, st));
+  const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), ex.id, mode, ex, w.id, HZ.targetRir(w, st));
   return HZ.buildSets({ ...ex, type:mode }, HZ.secOf(st) === "main" ? (st.warmup || 0) : 0, st.sets || 3, sg.next ?? null);
 }
 function entryView(){
@@ -374,7 +382,7 @@ function entryView(){
       const ex = { ...exBase, type:mode };
       const sets = d.st[st.id] || (d.st[st.id] = entrySets(w, st, exBase, mode, logs));
       HZ.refreshWarmups(ex, sets);
-      const tRir = HZ.targetRir(w, st); const sg = HZ.suggest(logs, ex.id, mode, exBase, w.id, tRir);
+      const tRir = HZ.targetRir(w, st); const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), ex.id, mode, exBase, w.id, tRir);
       out.push(el("section", { class:"card station" + (isMain ? " main" : "") },
         el("div", { class:"row between", style:"align-items:flex-start" },
           el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:labels[st.id] }), el("h3", { text:ex.name })),
@@ -406,6 +414,10 @@ async function saveEntry(btn){
   const { data, error } = await HZ.api.saveWorkoutLog(row);
   if (error){ toast(HZ.dbError(error)); btn.disabled = false; return; }
   const all = logs.filter(l => l.id !== data.id).concat(data);
+  // results typed in by the trainer are trusted: records from this entry are approved automatically
+  for (const pd of HZ.computeStats(all, A.appr || {}).pending.filter(x => x.logId === data.id)){
+    const r2 = await HZ.api.setApproval(pd.logId, client.id, pd.stationId, "ok");
+    if (!r2.error){ const ap = A.appr[pd.logId] || (A.appr[pd.logId] = { id:pd.logId, user_id:client.id, items:{} }); ap.items = { ...(ap.items || {}), [pd.stationId]:"ok" }; } }
   if (S.config.rankingEnabled !== false) await syncManualRanking(client, all);
   if (A.clientId === client.id) A.clientLogs = all;   // client view shows the new entry right away
   A.entry = null; A.rankRows = null; toast(`Zapisano wyniki: ${client.name}`);
@@ -416,7 +428,7 @@ async function saveEntry(btn){
 async function syncManualRanking(c, logs){
   const cs = c.consent || {};
   if (!cs.ranking){ await HZ.api.deleteRanking(c.id); return; }
-  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankRow(HZ.computeStats(logs || []), cs.health ? c.bodyweight : null), hidden:false, updatedAt:new Date().toISOString() });
+  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankFull(logs || [], A.appr || {}, cs.health ? c.bodyweight : null), hidden:false, updatedAt:new Date().toISOString() });
   if (rk.error) toast("Ranking się nie zaktualizował: opublikuj nowe reguły w Firebase.");
 }
 async function setManualConsent(c, patch, extra = {}){
@@ -430,7 +442,8 @@ async function setManualConsent(c, patch, extra = {}){
 
 /* ---------- clients ---------- */
 async function openClient(id){
-  A.tab = "clients"; HZ.LS.set("hz-admin-tab", "clients"); A.clientId = id; A.clientLogs = null; render();
+  A.tab = "clients"; HZ.LS.set("hz-admin-tab", "clients"); A.clientId = id; A.clientLogs = null; A.clientTech = null; render();
+  HZ.api.techniqueOf(id).then(r => { A.clientTech = (r && r.data) || []; render(); });
   const { data, error } = await HZ.api.logsOf(id);
   if (error){ toast(HZ.dbError(error)); A.clientLogs = []; } else A.clientLogs = data;
   render(); window.scrollTo(0, 0);
@@ -465,8 +478,12 @@ function clientsView(){
             const bw = v == null || !hcIn.checked ? null : Math.round(v * 10) / 10;
             if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })))
       : el("p", { class:"small muted", text: c.bodyweight ? `Masa ciała: ${HZ.fmtKg(c.bodyweight)} kg` : "Masa ciała: nie wpisana (klient wpisuje ją w Konto, za zgodą)" });
-    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), pastCard(c), delBar, consentBar, bwBar,
-      ...(A.clientLogs ? [A.clientLogs.length ? HZ.personalStats(A.clientLogs, `Statystyki: ${c.name || "klient"}`) : null, ...HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render)] : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
+    const advBar = c.manual ? null : el("label", { class:"row small", style:"flex-wrap:nowrap;cursor:pointer;gap:8px" },
+      el("input", { id:"cl-adv", type:"checkbox", style:"width:auto", checked: c.advanced || null, async onchange(ev){ const on = ev.target.checked; const { error } = await HZ.api.setAdvanced(c.id, on);
+        if (error){ ev.target.checked = !on; toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; } c.advanced = on; toast(on ? "Klient zaawansowany: widzi funkcje „dla zaawansowanych”" : "Zwykły widok klienta"); render(); } }),
+      el("span", {}, el("b", { text:"Klient zaawansowany" }), " – widzi funkcje, które w ustawieniach są włączone „dla zaawansowanych” (np. RIR)."));
+    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), pastCard(c), advBar, techHistory(c), delBar, consentBar, bwBar,
+      ...(A.clientLogs ? [A.clientLogs.length ? HZ.personalStats(A.clientLogs, `Statystyki: ${c.name || "klient"}`, A.appr || {}) : null, ...HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render)] : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
   }
   const nameIn = el("input", { id:"manual-name", maxlength:"60", placeholder:"Imię (i nazwisko)" });
   const infIn = el("input", { id:"manual-inf", type:"checkbox", style:"width:auto;margin-top:3px" });
@@ -498,6 +515,93 @@ function clientsView(){
           el("td", {}, el("button", { class:"link", onclick(){ openClient(c.id); }, text:c.name || c.email }), " ", el("button", { class:"ghost small", style:"padding:2px 8px", onclick(){ openClient(c.id); }, text:"+ wyniki" }), c.manual ? el("span", { class:"small muted", text:" · bez konta" }) : null, c.guest ? el("span", { class:"chip", style:"margin-left:6px", text:"gość" }) : null),
           el("td", { text:s.n }), el("td", { text: s.last ? HZ.fmtDate(s.last) : "–" }),
           el("td", { text: s.fn ? (s.fsum / s.fn).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–" })); })))))];
+}
+
+/* ---------- client features (simple by default; more for advanced clients) ---------- */
+function featCard(){
+  const f = S.config.features;
+  const save = async patch => { const { error } = await HZ.api.setFeatures(patch); if (error){ toast(HZ.dbError(error)); return; } Object.assign(f, patch); HZ.applyHolo(); toast("Zapisano"); render(); };
+  const sel = (key, label, hint) => el("label", { class:"f" }, label,
+    el("select", { id:"feat-" + key, value:f[key], onchange(e){ save({ [key]:e.target.value }); } },
+      el("option", { value:"off", text:"Wyłączone" }), el("option", { value:"adv", text:"Tylko klienci zaawansowani" }), el("option", { value:"all", text:"Wszyscy klienci" })),
+    hint ? el("span", { class:"small muted", style:"font-weight:400", text:hint }) : null);
+  const chk = (key, label, hint, onTurnOn) => el("label", { class:"row small", style:"flex-wrap:nowrap;align-items:flex-start;cursor:pointer;gap:8px" },
+    el("input", { id:"feat-" + key, type:"checkbox", style:"width:auto;margin-top:3px", checked: f[key] ? true : null, onchange(e){ save({ [key]:e.target.checked, ...(e.target.checked && onTurnOn ? onTurnOn() : {}) }); } }),
+    el("span", {}, el("b", { text:label }), hint ? " – " + hint : ""));
+  return el("div", { class:"card" }, el("h2", { text:"Funkcje dla klientów" }),
+    el("p", { class:"small muted", text:"Domyślnie widok klienta jest prosty. Bardziej zaawansowane rzeczy włączasz wszystkim albo tylko klientom oznaczonym jako zaawansowani (Klienci → imię). Ty w panelu widzisz zawsze wszystko." }),
+    el("div", { class:"grid2" },
+      sel("rir", "RIR (zapas powtórzeń)", "Bez RIR podpowiedzi opierają się na zrobionych powtórzeniach."),
+      sel("acc", "Akcesoria (stacje)", "Wyłączone: klient widzi tylko trening główny. Akcesoria zostają w planie."),
+      sel("pain", "„Czy coś bolało?” (beta)", "Po wpisaniu klient dostaje radę: zmniejsz ciężar albo zapytaj trenera.")),
+    chk("requireStart", "Wpisywanie dopiero po rozpoczęciu treningu", "w Treningach klikasz „Rozpocznij” na zajęciach i „Zakończ” po nich. Bez tego nikt spoza zajęć nic nie wpisze."),
+    chk("approve", "Każdy rekord ciężaru zatwierdzam ja", "bez tego zatwierdzasz tylko podejrzanie duże skoki (więcej niż 2× skok ciężaru albo 10%). Niezatwierdzone nie liczą się do rankingu.", () => ({ approveSince:HZ.todayISO() })),
+    chk("holo", "Animacja holograficzna podium", "błyszczące naklejki za 1., 2. i 3. miejsce w rankingu."));
+}
+function openBtn(w){
+  if (!w) return null;
+  return w.open ? el("button", { class:"danger", async onclick(ev){ ev.currentTarget.disabled = true; const { error } = await HZ.api.setWorkoutOpen(w.id, false); if (error){ toast(HZ.dbError(error)); return; }
+      w.open = false; w.closedAt = new Date().toISOString(); toast("Zakończono – klienci nie mogą już wpisywać"); render(); }, text:"■ Zakończ wpisywanie" })
+    : el("button", { class:"primary", async onclick(ev){ ev.currentTarget.disabled = true; const { error } = await HZ.api.setWorkoutOpen(w.id, true); if (error){ toast(HZ.dbError(error)); return; }
+      w.open = true; delete w.closedAt; toast("Trening rozpoczęty – klienci mogą wpisywać"); render(); }, text: w.closedAt ? "▶ Otwórz ponownie" : "▶ Rozpocznij trening" });
+}
+/* records waiting for the trainer: big jumps always, every weight record when approval is on */
+function pendingAll(){
+  if (!A.allLogs) return [];
+  const byUser = {}; for (const l of A.allLogs) (byUser[l.user_id] = byUser[l.user_id] || []).push(l);
+  return A.clients.flatMap(c => HZ.computeStats(byUser[c.id] || [], A.appr || {}).pending.map(p => ({ ...p, client:c })));
+}
+async function decide(p, val){
+  const { error } = await HZ.api.setApproval(p.logId, p.client.id, p.stationId, val);
+  if (error){ toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; }
+  const a = A.appr[p.logId] || (A.appr[p.logId] = { id:p.logId, user_id:p.client.id, items:{} }); a.items = { ...(a.items || {}), [p.stationId]:val };
+  if (S.config.rankingEnabled !== false && p.client.consent && p.client.consent.ranking) await syncManualRanking(p.client, A.allLogs.filter(l => l.user_id === p.client.id));
+  A.rankRows = null; toast(val === "ok" ? "Zatwierdzono rekord" : "Odrzucono – nie liczy się do rekordów"); render();
+}
+function approvalCard(){
+  const list = pendingAll(); if (!list.length) return null;
+  return el("div", { class:"card", style:"border-color:var(--accent)" }, el("h2", { text:`Rekordy do zatwierdzenia (${list.length})` }),
+    el("p", { class:"small muted", text:"Nie liczą się do rekordów i rankingu, dopóki ich nie zatwierdzisz. Odrzucony wynik zostaje w historii klienta." }),
+    el("div", { class:"list" }, list.map(p => el("div", { class:"stack", style:"gap:6px" },
+      el("div", { class:"row between", style:"flex-wrap:nowrap" }, el("b", { text:`${p.client.name} · ${p.name}` }), el("span", { class:"chip" + (p.reason === "duży skok" ? " warn" : ""), text:p.reason })),
+      el("span", { class:"small", text:`${p.from === 0 ? "bez ciężaru" : HZ.fmtKg(p.from) + " kg"} → ${HZ.fmtKg(p.to)} kg × ${p.reps} (${HZ.fmtDate(p.date)}), +${HZ.fmtKg(Math.round((p.to - p.from) * 100) / 100)} kg` }),
+      el("div", { class:"row" }, el("button", { class:"primary", onclick(){ decide(p, "ok"); }, text:"✓ Zatwierdź" }), el("button", { class:"ghost", onclick(){ decide(p, "no"); }, text:"✕ Odrzuć" }))))));
+}
+/* unsent draft: the trainer sees it and can save it as the result */
+function draftBox(dr, client, wid, hasLog){
+  return el("div", { class:"stack", style:"gap:6px;border:1px dashed var(--line);border-radius:8px;padding:8px" },
+    el("span", { class:"chip warn", style:"align-self:flex-start", text:`${hasLog ? "Niewysłane zmiany" : "Nie wysłano"} · wersja robocza z ${new Date(dr.saved_at).toLocaleTimeString("pl-PL", { hour:"2-digit", minute:"2-digit" })}` }),
+    el("div", { class:"list" }, (dr.entries || []).map(e => el("div", { class:"stack", style:"gap:2px" }, el("span", { style:"font-weight:600", text:e.exName }), el("span", { class:"num", text:HZ.setsText(e) })))),
+    dr.pain ? el("span", { class:"chip bad", style:"align-self:flex-start", text:"Ból: " + dr.pain }) : null,
+    el("button", { style:"align-self:flex-start", async onclick(ev){ ev.currentTarget.disabled = true;
+      const { pain, ...rest } = dr; const row = { user_id:client.id, workout_id:wid, date:dr.date, title:dr.title || "", own:false, fatigue:dr.fatigue ?? null, note:dr.note || "", entries:dr.entries || [], saved_at:new Date().toISOString(), ...(pain ? { pain } : {}) };
+      const { error } = await HZ.api.saveWorkoutLog(row); if (error){ toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); ev.currentTarget.disabled = false; return; }
+      await HZ.api.deleteDraft(client.id, wid); toast(`Zapisano wynik: ${client.name}`); await loadClients().catch(() => {}); loadResults(wid); }, text:"Zapisz jako wynik" }));
+}
+/* technique score 1–5 + short note: visible only to the trainer */
+function techPick(log, client, wid, e){
+  const cur = ((A.res.tech || {})[log.id] || {})[e.stationId] || {};
+  const save = async val => { const { error } = await HZ.api.setTechnique(log.id, client.id, wid, e.stationId, val);
+    if (error){ toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; }
+    A.res.tech = A.res.tech || {}; A.res.tech[log.id] = { ...(A.res.tech[log.id] || {}), [e.stationId]:val }; render(); };
+  const note = el("input", { class:"small", placeholder:"notatka (tylko dla Ciebie)", maxlength:"120", value:cur.note || "", style:"flex:1 1 140px;min-width:0;padding:4px 8px",
+    onchange(ev){ save({ score:cur.score ?? null, note:ev.target.value.trim().slice(0,120) }); } });
+  return el("div", { class:"techpick" }, el("span", { class:"small muted", text:"Technika:" }),
+    [1,2,3,4,5].map(n => el("button", { type:"button", class:"ghost", "aria-pressed":String(cur.score === n), title:["","zła","słaba","ok","dobra","bardzo dobra"][n],
+      onclick(){ save({ score: cur.score === n ? null : n, note:cur.note || "" }); }, text:String(n) })), note);
+}
+function techHistory(c){
+  if (!A.clientTech || !A.clientLogs) return null;
+  const rows = [];
+  for (const t of A.clientTech){ const log = A.clientLogs.find(l => l.id === t.id); if (!log) continue;
+    for (const [sid, v] of Object.entries(t.items || {})){ if (v.score == null && !v.note) continue; const e = (log.entries || []).find(x => x.stationId === sid);
+      rows.push({ date:log.date, name: e ? e.exName : "Ćwiczenie", ...v }); } }
+  if (!rows.length) return null;
+  rows.sort((a,b) => b.date.localeCompare(a.date));
+  return el("div", { class:"card" }, el("h3", { text:"Ocena techniki (widzisz tylko Ty)" }),
+    el("div", { class:"list" }, rows.slice(0, 12).map(r => el("div", { class:"row between", style:"flex-wrap:nowrap" },
+      el("span", { style:"min-width:0" }, el("b", { text:r.name }), r.note ? el("span", { class:"small muted", text:" · " + r.note }) : null),
+      el("span", { class:"small", style:"white-space:nowrap", text:(r.score != null ? `${r.score}/5 · ` : "") + HZ.fmtDate(r.date) })))));
 }
 
 /* ---------- trainer adds earlier trainings (e.g. from before the app) for any client ---------- */
