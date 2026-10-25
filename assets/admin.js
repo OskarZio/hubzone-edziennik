@@ -562,7 +562,7 @@ function planCard(c){
         allowed.length > 1 ? el("div", { class:"modes", role:"group", "aria-label":"Ciężar czy guma" }, allowed.map(m => el("button", { type:"button", "aria-pressed":String(draft.type === m),
           onclick(){ if (draft.type !== m){ draft.type = m; draft.load = m === "band" ? (S.config.bands[0] || {}).id || null : 0; render(); } }, text:HZ.MODE_LABEL[m] }))) : null,
         el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px" },
-          el("div", { style:"flex:1;min-width:0" }, HZ.loadInput({ ...ex, type:draft.type }, draft.load, v => { draft.load = v; render(); }, `pl-l-${exId}`)),
+          el("div", { style:"flex:1;min-width:0" }, HZ.loadInput({ ...ex, type:draft.type }, draft.load, v => { draft.load = v; if (v === 0 || v === null) setTimeout(render, 0); }, `pl-l-${exId}`)),
           el("input", { id:`pl-r-${exId}`, placeholder:"powt.", maxlength:"10", value:draft.reps, style:"width:5.5rem;text-align:center", oninput(e){ draft.reps = e.target.value; } })),
         el("div", { class:"chips" },
           ...(draft.type === "kg" ? [-2.5, -1.25, 1.25, 2.5, 5].map(d => el("button", { type:"button", class:"pick", onclick(){ bump(d); }, text:(d > 0 ? "+" : "−") + HZ.fmtKg(Math.abs(d)) }))
