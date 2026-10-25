@@ -3,7 +3,7 @@
 "use strict";
 const { el, S, toast } = HZ;
 const app = document.getElementById("app");
-const C = { appr:{}, session:null, profile:null, logs:[], loaded:false, tab:"today", authMode: HZ.inviteCode ? "guest" : "login", sel:null, drafts:{}, own:null, error:null };
+const C = { appr:{}, plan:{}, session:null, profile:null, logs:[], loaded:false, tab:"today", authMode: HZ.inviteCode ? "guest" : "login", sel:null, drafts:{}, own:null, error:null };
 
 function render(){ HZ.swap(app, view()); }
 const draftsKey = () => "hz-drafts-" + (C.session ? C.session.user.id : "x");
@@ -20,6 +20,9 @@ const pushDraft = (() => { let t, last = ""; return () => { clearTimeout(t); t =
   const { error } = await HZ.api.saveDraft({ ...row, saved_at:new Date().toISOString() }); if (!error) last = key; }, 4000); }; })();
 const painOf = d => HZ.feat("pain", C.profile) && d && d.painOn && (d.pain || "").trim() ? d.pain.trim().slice(0, 200) : null;
 const rirOn = () => HZ.feat("rir", C.profile);
+const custom = () => !!(S.config.features && S.config.features.custom);
+const tipFor = (w, st, exBase, mode) => HZ.trainerTip(C.plan, C.logs, exBase.id, mode)
+  || HZ.suggest(HZ.dropRejected(C.logs, C.appr), exBase.id, mode, custom() ? HZ.progEx(exBase, C.profile.progression) : exBase, w.id, rirOn() ? HZ.targetRir(w, st) : null);
 const isLocked = w => !!(S.config.features && S.config.features.requireStart) && !(C.profile && C.profile.is_admin) && w.open !== true;
 
 async function loadAll(){
@@ -33,6 +36,7 @@ async function loadAll(){
       const [lg] = await Promise.all([HZ.api.logsOf(uid), HZ.loadConfig(), HZ.loadWorkouts()]);
       if (lg.error) throw lg.error;
       C.logs = lg.data.sort((a,b) => (a.date||"").localeCompare(b.date||""));
+      const pl = await HZ.api.planOf(uid); C.plan = pl.data || {};
       const ap = await HZ.api.approvalsOf(uid); C.appr = Object.fromEntries((ap.data || []).map(a => [a.id, a]));
       HZ.applyHolo(); HZ.rirOn = rirOn();
       if (S.config.rankingEnabled && C.profile.consent && C.profile.consent.ranking) HZ.api.ranking().then(r => { if (!r.error){ C.rankRows = r.data; render(); } });
@@ -143,10 +147,12 @@ function todayView(){
     el("p", { class:"small", text:"Gdy pojawi się piątkowy plan, zobaczysz tu stacje i miejsce na swoje serie." }),
     S.config.ownEnabled ? el("button", { onclick(){ C.tab = "own"; render(); }, text:"Zapisz trening własny" }) : null)];
   const saved = C.logs.find(l => l.workout_id === w.id);
+  livePoll();
+  if (HZ.groupsOn() && !C.sel){ const same = ws.filter(x => x.date === w.date); if (same.length > 1) return groupChooser(same); }
   if (isLocked(w)) return lockedView(ws, w, saved);
   const d = draftFor(w);
   const pick = el("select", { id:"wsel", "aria-label":"Wybierz trening", onchange(e){ C.sel = e.target.value; render(); } },
-    [...ws].reverse().map(x => el("option", { value:x.id, text:`#${HZ.workoutNo(x.id)} · ${HZ.fmtDate(x.date)}${x.title ? " · " + x.title : ""}` })));
+    [...ws].reverse().map(x => el("option", { value:x.id, text:`${HZ.workoutLabel(x)}` })));
   pick.value = w.id;
   const out = [el("div", { class:"row between" },
     el("div", { class:"stack", style:"gap:2px" }, el("h2", { text: w.title || `Trening #${HZ.workoutNo(w.id)}` }),
@@ -154,6 +160,7 @@ function todayView(){
         return [m ? `${m} ${HZ.plural(m, "bój", "boje", "bojów")}` : null, a ? `${a} ${HZ.plural(a, "stacja", "stacje", "stacji")}` : null].filter(Boolean).join(" · "); })()}${saved ? " · wysłano " + new Date(saved.saved_at).toLocaleTimeString("pl-PL", { hour:"2-digit", minute:"2-digit" }) : ""}` })),
     el("div", { style:"max-width:240px;flex:1 1 170px" }, pick))];
   if (w.note) out.push(el("p", { class:"muted", text:w.note }));
+  if (custom() && C.profile.task) out.push(el("div", { class:"notice" }, el("b", { text:"Zadanie od trenera: " }), C.profile.task));
   if (C.profile.guest) out.unshift(guestBanner());
   else { const msg = C.rankRows && HZ.myRankMessage(C.rankRows, C.session.user.id) || HZ.personalMessage(C.logs); if (msg) out.unshift(HZ.motivationBox(msg)); }
   const labels = HZ.stationLabels(HZ.orderStations(w.stations || []));
@@ -175,7 +182,7 @@ function todayView(){
 }
 function freshSets(w, st, ex, mode){
   const mx = { ...ex, type:mode };
-  const sg = HZ.suggest(HZ.dropRejected(C.logs, C.appr), ex.id, mode, ex, w.id, rirOn() ? HZ.targetRir(w, st) : null);
+  const sg = tipFor(w, st, ex, mode);
   return HZ.buildSets(mx, HZ.secOf(st) === "main" ? (st.warmup || 0) : 0, st.sets || 3, sg.next ?? null);
 }
 function stationCard(w, st, exBase, label, d, isSuper){
@@ -185,7 +192,8 @@ function stationCard(w, st, exBase, label, d, isSuper){
   const ex = { ...exBase, type:mode };
   const sets = d.st[st.id] || (d.st[st.id] = freshSets(w, st, exBase, mode));
   const tRir = rirOn() ? HZ.targetRir(w, st) : null;
-  const sg = HZ.suggest(HZ.dropRejected(C.logs, C.appr), ex.id, mode, exBase, w.id, tRir);
+  const sg = tipFor(w, st, exBase, mode);
+  reshape(d, st, sets, ex);
   HZ.refreshWarmups(ex, sets);
   const curLoad = (sets.find(s => !s.warmup) || {}).load;
   const isMain = HZ.secOf(st) === "main";
@@ -409,6 +417,32 @@ function joinCard(){
     logoutButton("ghost"));
 }
 
+/* trainer edits the plan live: number of sets follows the new plan (empty sets only, typed ones stay) */
+function reshape(d, st, sets, ex){
+  d.shape = d.shape || {}; const key = `${HZ.secOf(st) === "main" ? (st.warmup || 0) : 0}|${st.sets || 3}`;
+  if (!d.shape[st.id]){ d.shape[st.id] = key; return; } if (d.shape[st.id] === key) return;
+  const [wn, sn] = key.split("|").map(Number);
+  let work = sets.filter(x => !x.warmup);
+  while (work.length > Math.max(1, sn) && work[work.length - 1].reps == null){ sets.splice(sets.lastIndexOf(work[work.length - 1]), 1); work = sets.filter(x => !x.warmup); }
+  while (work.length < sn){ const last = work[work.length - 1]; sets.push({ load: last ? last.load : null, reps:null, rir:null }); work = sets.filter(x => !x.warmup); }
+  let warm = sets.filter(x => x.warmup);
+  while (warm.length > wn && warm[warm.length - 1].reps == null){ sets.splice(sets.indexOf(warm[warm.length - 1]), 1); warm = sets.filter(x => x.warmup); }
+  if (warm.length < wn){ const add = wn - warm.length; for (let i = 0; i < add; i++) sets.splice(warm.length, 0, { load:null, reps:null, rir:null, warmup:true }); HZ.refreshWarmups(ex, sets); }
+  d.shape[st.id] = key; saveDrafts();
+}
+let liveTimer = null, liveKey = "";
+function livePoll(){
+  if (liveTimer) return;
+  liveTimer = setInterval(async () => { if (document.visibilityState !== "visible" || C.tab !== "today" || !C.session) return;
+    const before = JSON.stringify(S.workouts); await HZ.loadWorkouts().catch(() => {}); const after = JSON.stringify(S.workouts);
+    if (before !== after){ const w = S.workouts.find(x => x.id === currentId()); if (w && !isLocked(w)) toast("Trener zaktualizował trening"); render(); } }, 30000);
+}
+function groupChooser(same){
+  return [el("div", { class:"card" }, el("h2", { text:"Na który trening przyszedłeś/-aś?" }),
+    el("p", { class:"small muted", text:`${HZ.fmtDate(same[0].date, true)} – wybierz swoje zajęcia.` }),
+    el("div", { class:"stack", style:"gap:8px" }, same.map(x => el("button", { class:"primary", onclick(){ C.sel = x.id; render(); }, text: (HZ.groupName(x.group) || "Trening") + (x.title ? " · " + x.title : "") }))))];
+}
+
 /* ---------- training not started by the trainer yet (or already finished) ---------- */
 let lockPoll = null;
 function lockedView(ws, w, saved){
@@ -416,7 +450,7 @@ function lockedView(ws, w, saved){
   if (!w.closedAt) lockPoll = setInterval(async () => { if (document.visibilityState !== "visible" || C.tab !== "today") return;
     await HZ.loadWorkouts().catch(() => {}); const nw = S.workouts.find(x => x.id === w.id); if (nw && nw.open){ clearInterval(lockPoll); toast("Trening się zaczął – wpisuj serie!"); render(); } }, 15000);
   const pick = el("select", { id:"wsel", "aria-label":"Wybierz trening", onchange(e){ C.sel = e.target.value; render(); } },
-    [...ws].reverse().map(x => el("option", { value:x.id, text:`#${HZ.workoutNo(x.id)} · ${HZ.fmtDate(x.date)}${x.title ? " · " + x.title : ""}` })));
+    [...ws].reverse().map(x => el("option", { value:x.id, text:`${HZ.workoutLabel(x)}` })));
   pick.value = w.id;
   const names = HZ.orderStations(w.stations || []).filter(st => HZ.secOf(st) === "main" || HZ.feat("acc", C.profile)).map(st => (HZ.exById(st.exId) || {}).name).filter(Boolean);
   return [el("div", { class:"row between" }, el("h2", { text: w.title || `Trening #${HZ.workoutNo(w.id)}` }), el("div", { style:"max-width:240px;flex:1 1 170px" }, pick)),

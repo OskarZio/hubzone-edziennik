@@ -28,7 +28,7 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
@@ -74,6 +74,7 @@ HZ.api = {
     await u.delete().catch(e => { if (!u.isAnonymous) throw e; return auth.signOut(); });
   }),
   deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid);
+    await db.doc("plans/" + uid).delete().catch(() => {});
     for (const c of ["drafts", "approvals", "technique"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
   updateProfile: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
@@ -101,6 +102,7 @@ HZ.api = {
   deleteManualClient: id => wrap(async () => { await delWhere("user_id", id); await db.doc("ranking/" + id).delete().catch(() => {}); await db.doc("users/" + id).delete(); }),
   setFeatures: patch => wrap(() => db.doc("config/library").set({ features:patch }, { merge:true })),
   setAdvanced: (uid, on) => wrap(() => db.doc("users/" + uid).update({ advanced:!!on })),
+  updateClient: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
   setWorkoutOpen: (id, open) => wrap(() => db.doc("workouts/" + id).update(open ? { open:true, openedAt:new Date().toISOString() } : { open:false, closedAt:new Date().toISOString() })),
   /* records approved / rejected by the trainer (client can read own) */
   approvalsOf: uid => wrap(async () => list(await db.collection("approvals").where("user_id", "==", uid).get())),
@@ -114,6 +116,10 @@ HZ.api = {
   saveDraft: row => wrap(() => db.doc("drafts/" + row.user_id + "_" + row.workout_id).set(row)),
   deleteDraft: (uid, wid) => wrap(() => db.doc("drafts/" + uid + "_" + wid).delete()),
   draftsForWorkout: wid => wrap(async () => list(await db.collection("drafts").where("workout_id", "==", wid).get())),
+  saveGroups: groups => wrap(() => db.doc("config/library").set({ groups }, { merge:true })),
+  /* trainer's plan for the next training: weight and reps per exercise */
+  planOf: uid => wrap(async () => { const d = await db.doc("plans/" + uid).get(); return d.exists ? (d.data().items || {}) : {}; }),
+  setPlan: (uid, exId, val) => wrap(() => db.doc("plans/" + uid).set({ user_id:uid, items:{ [exId]:val } }, { merge:true })),
   getClub: () => wrap(async () => { const s = await db.doc("settings/club").get(); return s.exists ? (s.data().joinCode || null) : null; }),
   setClub: code => wrap(() => db.doc("settings/club").set({ joinCode:code })),
   saveWorkout: row => wrap(async () => { const { id, ...body } = row; await db.doc("workouts/" + id).set(body); return row; }),
@@ -231,7 +237,12 @@ HZ.bandKgMid = b => !b || !b.kg ? 0 : b.kgMax ? (Number(b.kg) + Number(b.kgMax))
 HZ.bandFull = id => { const b = S.config.bands.find(b => b.id === id); return b ? b.name + (b.kg ? ` (~${HZ.bandKgText(b)} kg)` : "") : HZ.bandName(id); };
 HZ.bandName = id => { if (id === HZ.SCAP) return "aktywacja łopatek"; if (id === "none") return "bez gumy"; const b = S.config.bands.find(b => b.id === id); return b ? b.name : "?"; };
 HZ.sortedWorkouts = () => [...S.workouts].sort((a,b) => (a.date||"").localeCompare(b.date||""));
-HZ.workoutNo = id => HZ.sortedWorkouts().findIndex(w => w.id === id) + 1;
+/* optional groups of trainings (e.g. Friday group, Tuesday gym) – numbering runs inside a group */
+HZ.groupsOn = () => !!(S.config && S.config.features && S.config.features.groups) && (S.config.groups || []).length > 0;
+HZ.groupName = gid => ((S.config.groups || []).find(g => g.id === gid) || {}).name || "";
+HZ.workoutNo = id => { const w = S.workouts.find(x => x.id === id); if (!w) return 0;
+  const same = HZ.groupsOn() ? HZ.sortedWorkouts().filter(x => (x.group || "") === (w.group || "")) : HZ.sortedWorkouts(); return same.findIndex(x => x.id === id) + 1; };
+HZ.workoutLabel = w => (HZ.groupsOn() && HZ.groupName(w.group) ? HZ.groupName(w.group) + " · " : "") + `#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date)}${w.title ? " · " + w.title : ""}`;
 HZ.defaultWorkoutId = () => {
   const ws = HZ.sortedWorkouts(); if (!ws.length) return null;
   const t = HZ.todayISO(); const past = ws.filter(w => w.date <= t);
@@ -244,7 +255,7 @@ HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(lo
 HZ.loadConfig = async () => {
   const s = await db.doc("config/library").get(); const d = s.exists ? s.data() : {};
   S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false,
-    features:{ rir:"off", acc:"all", pain:"off", approve:false, approveSince:null, requireStart:false, holo:true, ...(d.features || {}) }, guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
+    features:{ rir:"off", acc:"all", pain:"off", approve:false, approveSince:null, requireStart:false, holo:true, groups:false, custom:false, ...(d.features || {}) }, groups:d.groups || [], guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
 };
 /* client features: "off" | "adv" (only clients marked as advanced) | "all"; the trainer's client view shows exactly what clients see */
 HZ.feat = (name, profile) => { const v = ((S.config && S.config.features) || {})[name];
@@ -440,7 +451,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     body.push(r); });
   return el("div", { class:"sets" + (opts.noRir ? " norir" : "") }, head, body, ctl);
 };
-HZ.tipBox = (sg, onPick, current) => el("div", { class:"tip " + sg.kind }, el("span", { class:"ic", "aria-hidden":"true", text:{ up:"↑", hold:"=", down:"↓", first:"•" }[sg.kind] }),
+HZ.tipBox = (sg, onPick, current) => el("div", { class:"tip " + sg.kind }, el("span", { class:"ic", "aria-hidden":"true", text:{ up:"↑", hold:"=", down:"↓", first:"•", plan:"★" }[sg.kind] }),
   el("div", { class:"stack", style:"gap:6px" }, el("div", {}, el("b", { text:sg.title }), el("span", { text:sg.text })),
     onPick && sg.options && sg.options.length > 1 ? el("div", { class:"chips" }, sg.options.map(o => el("button", { type:"button", class:"pick",
       "aria-pressed":String(JSON.stringify(current) === JSON.stringify(o.load)), onclick(){ onPick(o.load); }, text: o.label + (o.rec ? " · polecane" : "") }))) : null,
@@ -672,6 +683,18 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
 /* entries the trainer rejected don't drive the next suggestion */
 HZ.dropRejected = (logs, appr = {}) => logs.map(l => { const it = (appr[l.id] || {}).items; if (!it) return l;
   const entries = (l.entries || []).filter(e => it[e.stationId] !== "no"); return entries.length === (l.entries || []).length ? l : { ...l, entries }; });
+/* active trainer plan for an exercise (set after the client's last session with it) -> shown instead of the system tip */
+HZ.trainerTip = (plan, logs, exId, mode) => {
+  const it = plan && plan[exId]; if (!it || it.load == null || (it.type || "kg") !== mode) return null;
+  const last = logs.filter(l => (l.entries || []).some(e => e.exId === exId)).map(l => l.saved_at || l.date || "").sort().pop() || "";
+  if (last > (it.at || "")) return null;
+  const what = HZ.fmtLoad(mode, it.load) + (it.reps ? ` × ${it.reps}` : "");
+  return { kind:"plan", title:`Trener zaleca: ${what}`, text: it.src === "system" ? "Trener zatwierdził podpowiedź na ten trening." : "Ciężar i powtórzenia ustalone przez trenera na ten trening.",
+    next:it.load, reps:it.reps || null, base:null };
+};
+/* individual progression set by the trainer (feature "custom"): faster = bigger jumps, slower = smallest jump only */
+HZ.progEx = (ex, prog) => { if (!ex || !prog || prog === "std") return ex; const [lo, hi] = HZ.incRange(ex);
+  return prog === "fast" ? { ...ex, incMin:hi, incMax:hi * 2 } : { ...ex, incMin:lo, incMax:lo }; };
 HZ.monthKey = () => HZ.todayISO().slice(0, 7);
 HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
 /* full ranking row: all-time + this month */

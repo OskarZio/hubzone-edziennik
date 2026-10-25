@@ -63,9 +63,12 @@ service cloud.firestore {
         && validName(request.resource.data)
         && (!('consent' in request.resource.data) || validConsent(request.resource.data.consent))
         && validBodyweight(request.resource.data);
-      // trener oznacza klienta jako zaawansowanego (więcej funkcji w aplikacji); klient sam tego nie zmieni
+      // trener: klient zaawansowany, indywidualna progresja i zadanie; klient sam tego nie zmieni
       allow update: if isAdmin() && resource.data.get('isAdmin', false) != true
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advanced']) && request.resource.data.advanced is bool;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advanced', 'progression', 'task'])
+        && request.resource.data.get('advanced', false) is bool
+        && request.resource.data.get('progression', 'std') in ['std', 'fast', 'slow']
+        && request.resource.data.get('task', '') is string && request.resource.data.get('task', '').size() <= 300;
       // prawo do usunięcia danych: klient usuwa swój profil; trener może usunąć profil klienta (nie trenera)
       allow delete: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('isAdmin', false) != true));
     }
@@ -149,6 +152,12 @@ service cloud.firestore {
     match /approvals/{id} {
       allow read: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
       allow write: if isAdmin();
+    }
+
+    // Plan na następny trening (ciężar i powtórzenia od trenera): zapisuje trener, klient widzi swój.
+    match /plans/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin() && isClient(uid);
     }
 
     // Ocena techniki: tylko trener.

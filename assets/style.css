@@ -240,3 +240,7 @@ table.rank td .medal.sm{ vertical-align:middle; }
 .techpick button{ min-width:32px; padding:4px 6px; font-size:.85rem; }
 .techpick button[aria-pressed="true"]{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
 .locked{ text-align:center; }
+
+/* trainer's plan for this training */
+.tip.plan{ background:var(--accent-soft); border-color:var(--accent); }
+.tip.plan .ic{ color:var(--accent); }

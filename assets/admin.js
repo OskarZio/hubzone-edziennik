@@ -213,17 +213,23 @@ async function saveLibrary(c){
 /* ---------- workouts ---------- */
 function workoutsView(){
   if (A.editW) return [workoutEditor()];
-  const ws = HZ.sortedWorkouts().reverse();
+  const allWs = HZ.sortedWorkouts().reverse();
+  const ws = HZ.groupsOn() && A.group ? allWs.filter(w => (w.group || "") === A.group) : allWs;
   const nextFri = (() => { const d = new Date(); d.setDate(d.getDate() + (5 - d.getDay() + 7) % 7); return d.toLocaleDateString("sv-SE"); })();
   const out = [el("div", { class:"row between" }, el("h2", { text:"Treningi" }), el("button", { class:"primary", onclick(){
     const last = HZ.sortedWorkouts().slice(-1)[0];
     A.editW = { id:null, date:nextFri, title:"", note:"", stations: last ? HZ.clone(last.stations || []).map(s => ({ ...s, id:HZ.uuid() })) : [newStation("main"), newStation("acc")] };
+    if (HZ.groupsOn()) A.editW.group = A.group || (last && last.group) || S.config.groups[0].id;
     render(); }, text:"+ Nowy trening" }))];
+  if (HZ.groupsOn()) out.push(el("div", { class:"modes", role:"group", "aria-label":"Grupa" },
+    [["", "Wszystkie"], ...S.config.groups.map(g => [g.id, g.name])].map(([id, name]) => el("button", { type:"button", "aria-pressed":String((A.group || "") === id), onclick(){ A.group = id; render(); }, text:name }))));
   if (!ws.length) out.push(el("div", { class:"empty", text:"Brak treningów. Dodaj pierwszy piątek, a klienci zobaczą stacje u siebie." }));
   ws.forEach(w => out.push(el("div", { class:"card" },
     el("div", { class:"row between" },
-      el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date, true)}` }), el("h3", { text:w.title || "Trening stacyjny" })),
+      el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:(HZ.groupsOn() && HZ.groupName(w.group) ? HZ.groupName(w.group) + " · " : "") + `#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date, true)}` + (w.open ? " · trwa" : "") }), el("h3", { text:w.title || "Trening stacyjny" })),
       el("div", { class:"row" }, S.config.features.requireStart ? openBtn(w) : null, el("button", { onclick(){ A.editW = HZ.clone(w); render(); }, text:"Edytuj" }),
+        el("button", { class:"ghost", onclick(){ const c = HZ.clone(w); delete c.open; delete c.openedAt; delete c.closedAt;
+          A.editW = { ...c, id:null, date:nextFri, stations:(c.stations || []).map(s2 => ({ ...s2, id:HZ.uuid() })) }; render(); window.scrollTo(0, 0); toast("Kopia treningu – ustaw datę i zapisz"); }, text:"Kopiuj" }),
         el("button", { onclick(){ A.tab = "results"; A.res = { wid:w.id, rows:null, loading:false }; HZ.LS.set("hz-admin-tab", "results"); render(); }, text:"Wyniki" }))),
     el("div", { class:"chips" }, HZ.orderStations(w.stations || []).map(s => { const ex = HZ.exById(s.exId); const lb = HZ.stationLabels(HZ.orderStations(w.stations || []))[s.id]; return el("span", { class:"chip" + (HZ.secOf(s) === "main" ? " main" : ""), text:`${lb}. ${ex ? ex.name : "?"} ${s.warmup ? s.warmup + "W + " : ""}${s.sets}×${s.reps}` }); })),
     A.confirmDel === w.id
@@ -242,6 +248,9 @@ function workoutEditor(){
     el("div", { class:"grid2" },
       el("label", { class:"f" }, "Data", el("input", { id:"we-date", type:"date", value:w.date, onchange(e){ w.date = e.target.value; } })),
       el("label", { class:"f" }, "Nazwa (opcjonalnie)", el("input", { id:"we-title", maxlength:"80", value:w.title || "", placeholder:"np. Siła – dół", oninput(e){ w.title = e.target.value; } }))),
+    HZ.groupsOn() ? el("label", { class:"f" }, "Grupa / zajęcia", el("select", { id:"we-group", value:w.group || S.config.groups[0].id, onchange(e){ w.group = e.target.value; } },
+      S.config.groups.map(g => el("option", { value:g.id, text:g.name })))) : null,
+    w.id ? el("p", { class:"small muted", text:"Zmiany zobaczą klienci w ciągu ok. 30 s, także w trakcie treningu. Gdy zmniejszysz liczbę serii, puste serie znikną u nich same; wpisane zostają." }) : null,
     el("label", { class:"f" }, "Docelowy RIR na ten trening",
       el("select", { id:"we-rir", value: w.rir != null ? String(w.rir) : "", onchange(e){ w.rir = e.target.value === "" ? null : Number(e.target.value); render(); } },
         el("option", { value:"", text:"bez celu (podpowiedź wg ostatniego RIR)" }), [0,1,2,3,4].map(n => el("option", { value:String(n), text:`RIR ${n}` + (n === 0 ? " (do upadku)" : "") })))),
@@ -276,7 +285,7 @@ function workoutEditor(){
     el("div", { class:"row" },
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jeden bój albo stację."); return; }
-        const row = { ...(w.open != null ? { open:w.open } : {}), ...(w.openedAt ? { openedAt:w.openedAt } : {}), ...(w.closedAt ? { closedAt:w.closedAt } : {}), id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(), rir: w.rir ?? null,
+        const row = { ...(w.group ? { group:w.group } : {}), ...(w.open != null ? { open:w.open } : {}), ...(w.openedAt ? { openedAt:w.openedAt } : {}), ...(w.closedAt ? { closedAt:w.closedAt } : {}), id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(), rir: w.rir ?? null,
           stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, rir: s.rir ?? null, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
@@ -305,7 +314,7 @@ function resultsView(){
   const wid = A.res.wid && ws.some(w => w.id === A.res.wid) ? A.res.wid : HZ.defaultWorkoutId();
   if (!A.res.loading && (A.res.wid !== wid || !A.res.rows)) setTimeout(() => loadResults(wid), 0);
   const pick = el("select", { id:"res-w", "aria-label":"Trening", onchange(e){ loadResults(e.target.value); } },
-    [...ws].reverse().map(w => el("option", { value:w.id, text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date)}${w.title ? " · " + w.title : ""}` })));
+    [...ws].reverse().map(w => el("option", { value:w.id, text:`${HZ.workoutLabel(w)}` })));
   pick.value = wid;
   const rows = A.res.wid === wid ? A.res.rows : null; const done = rows ? rows.filter(r => r.log) : [];
   const avg = (() => { const f = done.map(r => r.log.fatigue).filter(v => v != null); return f.length ? (f.reduce((a,b) => a+b, 0) / f.length).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–"; })();
@@ -444,6 +453,7 @@ async function setManualConsent(c, patch, extra = {}){
 async function openClient(id){
   A.tab = "clients"; HZ.LS.set("hz-admin-tab", "clients"); A.clientId = id; A.clientLogs = null; A.clientTech = null; render();
   HZ.api.techniqueOf(id).then(r => { A.clientTech = (r && r.data) || []; render(); });
+  HZ.api.planOf(id).then(r => { A.clientPlan = (r && r.data) || {}; render(); });
   const { data, error } = await HZ.api.logsOf(id);
   if (error){ toast(HZ.dbError(error)); A.clientLogs = []; } else A.clientLogs = data;
   render(); window.scrollTo(0, 0);
@@ -482,7 +492,7 @@ function clientsView(){
       el("input", { id:"cl-adv", type:"checkbox", style:"width:auto", checked: c.advanced || null, async onchange(ev){ const on = ev.target.checked; const { error } = await HZ.api.setAdvanced(c.id, on);
         if (error){ ev.target.checked = !on; toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; } c.advanced = on; toast(on ? "Klient zaawansowany: widzi funkcje „dla zaawansowanych”" : "Zwykły widok klienta"); render(); } }),
       el("span", {}, el("b", { text:"Klient zaawansowany" }), " – widzi funkcje, które w ustawieniach są włączone „dla zaawansowanych” (np. RIR)."));
-    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), pastCard(c), advBar, techHistory(c), delBar, consentBar, bwBar,
+    return [el("div", { class:"row" }, el("button", { onclick(){ A.clientId = null; render(); }, text:"← Wszyscy klienci" }), el("span", { class:"small muted", text:c.email || "" })), pastCard(c), advBar, planCard(c), S.config.features.custom ? customCard(c) : null, techHistory(c), delBar, consentBar, bwBar,
       ...(A.clientLogs ? [A.clientLogs.length ? HZ.personalStats(A.clientLogs, `Statystyki: ${c.name || "klient"}`, A.appr || {}) : null, ...HZ.progressView(A.clientLogs, c.name || "Klient", "c-" + A.clientId, render)] : [el("div", { class:"empty", text:"Wczytuję historię…" })])];
   }
   const nameIn = el("input", { id:"manual-name", maxlength:"60", placeholder:"Imię (i nazwisko)" });
@@ -517,6 +527,48 @@ function clientsView(){
           el("td", { text: s.fn ? (s.fsum / s.fn).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–" })); })))))];
 }
 
+/* ---------- plan for the next training: trainer's weight & reps, or approve the system's suggestion ---------- */
+function planCard(c){
+  const logs = A.clientLogs; if (!logs || !logs.length || !A.clientPlan) return null;
+  const sorted = [...logs].sort((a,b) => (b.date || "").localeCompare(a.date || ""));
+  const mainIds = new Set(S.workouts.flatMap(w => (w.stations || []).filter(st => HZ.secOf(st) === "main").map(st => st.exId)));
+  const seen = new Map(); for (const l of sorted) for (const e of (l.entries || [])) if (!seen.has(e.exId) && HZ.exById(e.exId)) seen.set(e.exId, e.type || "kg");
+  const items = [...seen.entries()].sort((a,b) => (mainIds.has(b[0]) ? 1 : 0) - (mainIds.has(a[0]) ? 1 : 0));
+  const save = async (exId, val) => { const { error } = await HZ.api.setPlan(c.id, exId, val);
+    if (error){ toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; }
+    A.clientPlan[exId] = val; toast(val ? "Ustawione na następny trening" : "Usunięto – klient dostanie zwykłą podpowiedź"); render(); };
+  return el("div", { class:"card" }, el("h3", { text:"Na następny trening" }),
+    el("p", { class:"small muted", text:"Klient zobaczy Twoje zalecenie zamiast podpowiedzi systemu (do czasu, aż zrobi to ćwiczenie). Zatwierdź podpowiedź jednym kliknięciem albo wpisz swoją." }),
+    el("div", { class:"list" }, items.map(([exId, type]) => {
+      const ex = HZ.exById(exId), base = S.config.features.custom ? HZ.progEx(ex, c.progression) : ex;
+      const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), exId, type, base);
+      const tip = HZ.trainerTip(A.clientPlan, logs, exId, type);
+      const draft = (A.planDraft = A.planDraft || {})[c.id + exId] || (A.planDraft[c.id + exId] = { load: sg.next ?? null, reps: sg.reps || "" });
+      return el("div", { class:"stack", style:"gap:6px" },
+        el("div", { class:"row between", style:"flex-wrap:nowrap" }, el("b", { text:ex.name }), tip ? el("span", { class:"chip", text:"✓ " + tip.title.replace("Trener zaleca: ", "") }) : null),
+        el("span", { class:"small muted", text:"System: " + sg.title }),
+        el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px" },
+          el("div", { style:"flex:1;min-width:0" }, HZ.loadInput({ ...ex, type }, draft.load, v => { draft.load = v; }, `pl-l-${exId}`)),
+          el("input", { id:`pl-r-${exId}`, placeholder:"powt.", maxlength:"10", value:draft.reps, style:"width:5.5rem;text-align:center", oninput(e){ draft.reps = e.target.value; } })),
+        el("div", { class:"row" },
+          sg.next != null ? el("button", { class:"primary", onclick(){ save(exId, { load:sg.next, reps:sg.reps || "", type, at:new Date().toISOString(), src:"system" }); }, text:"✓ Zatwierdź podpowiedź" }) : null,
+          el("button", { onclick(){ if (draft.load == null || draft.load === ""){ toast("Wpisz ciężar albo wybierz gumę."); return; }
+            save(exId, { load:draft.load, reps:String(draft.reps || "").trim().replace(/-/g, "–").slice(0, 10), type, at:new Date().toISOString(), src:"trener" }); }, text:"Zapisz moje" }),
+          tip ? el("button", { class:"ghost", onclick(){ save(exId, null); }, text:"Usuń" }) : null)); })));
+}
+/* individual progression + extra task (feature "custom") */
+function customCard(c){
+  const task = el("textarea", { id:"cl-task", maxlength:"300", value:c.task || "", placeholder:"np. Dodatkowo 3×10 pompek na koniec" });
+  const saveU = async patch => { const { error } = await HZ.api.updateClient(c.id, patch);
+    if (error){ toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return false; } Object.assign(c, patch); render(); return true; };
+  return el("div", { class:"card" }, el("h3", { text:"Indywidualna progresja" }),
+    el("label", { class:"f" }, "Tempo progresji", el("select", { id:"cl-prog", value:c.progression || "std", async onchange(e){ if (await saveU({ progression:e.target.value })) toast("Zapisano progresję"); } },
+      el("option", { value:"std", text:"Standardowa" }), el("option", { value:"fast", text:"Szybsza – większe skoki ciężaru" }), el("option", { value:"slow", text:"Wolniejsza – tylko najmniejszy skok" }))),
+    el("label", { class:"f" }, "Dodatkowe zadanie (klient zobaczy je na treningu)", task),
+    el("div", { class:"row" }, el("button", { onclick(){ saveU({ task:task.value.trim().slice(0, 300) }).then(ok => ok && toast("Zapisano zadanie")); }, text:"Zapisz zadanie" }),
+      c.task ? el("button", { class:"ghost", onclick(){ saveU({ task:"" }).then(ok => ok && toast("Usunięto zadanie")); }, text:"Usuń" }) : null));
+}
+
 /* ---------- client features (simple by default; more for advanced clients) ---------- */
 function featCard(){
   const f = S.config.features;
@@ -536,10 +588,23 @@ function featCard(){
       sel("pain", "„Czy coś bolało?” (beta)", "Po wpisaniu klient dostaje radę: zmniejsz ciężar albo zapytaj trenera.")),
     chk("requireStart", "Wpisywanie dopiero po rozpoczęciu treningu", "w Treningach klikasz „Rozpocznij” na zajęciach i „Zakończ” po nich. Bez tego nikt spoza zajęć nic nie wpisze."),
     chk("approve", "Każdy rekord ciężaru zatwierdzam ja", "bez tego zatwierdzasz tylko podejrzanie duże skoki (więcej niż 2× skok ciężaru albo 10%). Niezatwierdzone nie liczą się do rankingu.", () => ({ approveSince:HZ.todayISO() })),
-    chk("holo", "Animacja holograficzna podium", "błyszczące naklejki za 1., 2. i 3. miejsce w rankingu."));
+    chk("holo", "Animacja holograficzna podium", "błyszczące naklejki za 1., 2. i 3. miejsce w rankingu."),
+    chk("custom", "Indywidualna progresja i zadania", "w karcie klienta ustawisz szybszą lub wolniejszą progresję i dodatkowe zadanie, które zobaczy na treningu."),
+    chk("groups", "Podział na grupy treningów", "np. „Piątek – grupa” i „Wtorek – siłownia”. Klient wybiera zajęcia, Ty filtrujesz treningi po grupie."),
+    f.groups ? groupsEditor() : null);
+}
+function groupsEditor(){
+  const g = A.editGroups || (A.editGroups = HZ.clone(S.config.groups || []));
+  return el("div", { class:"stack", style:"gap:8px;border-top:1px solid var(--line);padding-top:10px" }, el("h3", { text:"Grupy" }),
+    g.length ? null : el("p", { class:"small muted", text:"Dodaj przynajmniej dwie grupy. Istniejące treningi bez grupy przypiszesz w edycji treningu." }),
+    g.map((x, i) => el("div", { class:"row", style:"flex-wrap:nowrap" }, el("input", { id:"grp-" + i, maxlength:"40", value:x.name, placeholder:"np. Piątek – grupa", oninput(e){ x.name = e.target.value; } }),
+      el("button", { class:"ghost", "aria-label":"Usuń grupę", onclick(){ g.splice(i, 1); render(); }, text:"✕" }))),
+    el("div", { class:"row" }, el("button", { onclick(){ g.push({ id:HZ.uuid().slice(0, 8), name:"" }); render(); }, text:"+ Grupa" }),
+      el("button", { class:"primary", async onclick(){ const clean = g.filter(x => x.name.trim()).map(x => ({ id:x.id, name:x.name.trim().slice(0, 40) }));
+        const { error } = await HZ.api.saveGroups(clean); if (error){ toast(HZ.dbError(error)); return; } S.config.groups = clean; A.editGroups = null; toast("Zapisano grupy"); render(); }, text:"Zapisz grupy" })));
 }
 function openBtn(w){
-  if (!w) return null;
+  if (!w || (!w.open && w.date < HZ.todayISO())) return null;   // past trainings can't be started
   return w.open ? el("button", { class:"danger", async onclick(ev){ ev.currentTarget.disabled = true; const { error } = await HZ.api.setWorkoutOpen(w.id, false); if (error){ toast(HZ.dbError(error)); return; }
       w.open = false; w.closedAt = new Date().toISOString(); toast("Zakończono – klienci nie mogą już wpisywać"); render(); }, text:"■ Zakończ wpisywanie" })
     : el("button", { class:"primary", async onclick(ev){ ev.currentTarget.disabled = true; const { error } = await HZ.api.setWorkoutOpen(w.id, true); if (error){ toast(HZ.dbError(error)); return; }
@@ -608,7 +673,7 @@ function techHistory(c){
 function pastCard(c){
   const done = new Set((A.clientLogs || []).map(l => l.workout_id));
   const ws = HZ.sortedWorkouts().reverse();
-  const sel = el("select", { id:"past-w", "aria-label":"Trening" }, ws.map(w => el("option", { value:w.id, text:`#${HZ.workoutNo(w.id)} · ${HZ.fmtDate(w.date)}${w.title ? " · " + w.title : ""}${done.has(w.id) ? " ✓ wpisany" : ""}` })));
+  const sel = el("select", { id:"past-w", "aria-label":"Trening" }, ws.map(w => el("option", { value:w.id, text:`${HZ.workoutLabel(w)}${done.has(w.id) ? " ✓ wpisany" : ""}` })));
   const prevFri = (() => { const first = HZ.sortedWorkouts()[0]; const d = first ? new Date(first.date + "T12:00:00") : new Date(); d.setDate(d.getDate() - 7); return d.toLocaleDateString("sv-SE"); })();
   return el("div", { class:"card" }, el("h3", { text:"Wpisz wyniki za klienta" }),
     el("p", { class:"small muted", text:"Np. treningi sprzed aplikacji. Wybierz trening i wpisz serie. Klient zobaczy je u siebie w postępach, rekordach i rankingu." }),
