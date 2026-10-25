@@ -120,12 +120,15 @@ function settingsView(){
   const c = A.editC;
   const exCard = el("div", { class:"card" }, el("h2", { text:"Ćwiczenia" }),
     el("p", { class:"small muted", text:"Klient sam wybiera na stacji: ciężar albo guma. Tu ustawiasz sposób domyślny, zakres skoku ciężaru (np. 1,25–2,5 kg) i serię wstępną W1 (ciężar, gumę albo ćwiczenie bez gumy, nazwę i powtórzenia). Kolejne serie wstępne aplikacja podnosi sama: 2. ok. 60% ciężaru roboczego na 3–4 powt., 3. ok. 80% na 1–2 powt." }),
-    el("div", { class:"list" }, c.exercises.map((e, i) => el("div", { class:"stack" },
+    catBar(c),
+    el("datalist", { id:"ex-cats" }, exCats(c.exercises).map(k => el("option", { value:k }))),
+    el("div", { class:"list" }, c.exercises.map((e, i) => A.exCat != null && (e.cat || "") !== A.exCat ? null : el("div", { class:"stack" },
       el("div", { class:"row", style:"flex-wrap:nowrap" },
         el("input", { id:`ex-n-${e.id || i}`, maxlength:"80", value:e.name, "aria-label":"Nazwa ćwiczenia", placeholder:"Nazwa ćwiczenia", oninput(ev){ e.name = ev.target.value; } }),
         el("button", { class:"ghost", "aria-label":"W górę", disabled:i === 0, onclick(){ [c.exercises[i-1], c.exercises[i]] = [c.exercises[i], c.exercises[i-1]]; render(); }, text:"↑" }),
         el("button", { class:"ghost", "aria-label":"Usuń ćwiczenie", onclick(){ c.exercises.splice(i, 1); render(); }, text:"✕" })),
       el("div", { class:"grid2" },
+        el("label", { class:"f", style:"grid-column:1/-1" }, "Kategoria (np. Weightlifting, Handstand)", el("input", { id:`ex-c-${e.id || i}`, list:"ex-cats", maxlength:"40", value:e.cat || "", placeholder:"bez kategorii", oninput(ev){ e.cat = ev.target.value; } })),
         el("label", { class:"f", style:"grid-column:1/-1" }, "Sposób wykonania", el("select", { id:`ex-t-${e.id || i}`, value:`${e.modes === "kg" || e.modes === "band" ? e.modes : "both"}:${e.type}`,
           onchange(ev){ const [m, t] = ev.target.value.split(":"); e.modes = m; e.type = t; render(); } },
           el("option", { value:"both:kg", text:"Ciężar lub guma (domyślnie ciężar)" }), el("option", { value:"both:band", text:"Ciężar lub guma (domyślnie guma)" }),
@@ -155,7 +158,7 @@ function settingsView(){
           el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),
           el("span", { text:"–" }),
           el("select", { id:`ex-hi-${e.id || i}`, "aria-label":"Skok do", value:String(HZ.incRange(e)[1]), onchange(ev){ e.incMax = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))))))))),
-    el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", incMin:1.25, incMax:2.5 }); render(); }, text:"+ Dodaj ćwiczenie" }));
+    el("button", { onclick(){ c.exercises.push({ id:HZ.uuid(), name:"", type:"kg", incMin:1.25, incMax:2.5, cat:A.exCat || "" }); render(); }, text:"+ Dodaj ćwiczenie" }));
   const bandCard = el("div", { class:"card" }, el("h2", { text:"Gumy" }),
     el("p", { class:"small muted", text:"Ułóż od najmocniejszej (największa pomoc) do najsłabszej. W polu kg wpisz, ile mniej więcej odciąża guma: jedną liczbę (15) albo zakres (3-5). Klient zobaczy to przy wyborze gumy, a podpowiedź przesuwa go w dół listy." }),
     el("div", { class:"list" }, c.bands.map((b, i) => el("div", { class:"row", style:"flex-wrap:nowrap" },
@@ -207,9 +210,26 @@ function settingsView(){
         S.config.guestLimit = n; toast(n ? `Gość musi założyć konto po ${n} ${HZ.plural(n, "treningu", "treningach", "treningach")}` : "Bez limitu dla gości"); render(); }, text:"Zapisz" })));
   return [exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
+/* exercise categories (e.g. Weightlifting, Handstand): sorted lists, every exercise still available everywhere */
+const exCats = list => [...new Set(list.map(e => (e.cat || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));
+function catBar(c){
+  const cats = exCats(c.exercises); if (!cats.length) return null;
+  const opts = [[null, "Wszystkie"], ...cats.map(k => [k, k]), ...(c.exercises.some(e => !(e.cat || "").trim()) ? [["", "Bez kategorii"]] : [])];
+  return el("div", { class:"chips" }, opts.map(([k, t]) => el("button", { type:"button", class:"pick", "aria-pressed":String(A.exCat === k || (k === null && A.exCat == null)),
+    onclick(){ A.exCat = k; render(); }, text: t + (k === null ? "" : ` (${c.exercises.filter(e => (e.cat || "").trim() === k).length})`) })));
+}
+/* station picker grouped by category; the category matching the training's group goes first */
+function exOptions(w){
+  const cats = exCats(S.config.exercises), first = HZ.groupsOn() && w && w.group ? HZ.groupName(w.group).toLowerCase() : "";
+  if (!cats.length) return S.config.exercises.map(e => el("option", { value:e.id, text:e.name }));
+  const order = [...cats].sort((a, b) => (b.toLowerCase() === first) - (a.toLowerCase() === first));
+  const other = S.config.exercises.filter(e => !(e.cat || "").trim());
+  return [...order.map(k => el("optgroup", { label:k }, S.config.exercises.filter(e => (e.cat || "").trim() === k).map(e => el("option", { value:e.id, text:e.name })))),
+    other.length ? el("optgroup", { label:"Inne" }, other.map(e => el("option", { value:e.id, text:e.name }))) : null];
+}
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type: e.modes === "kg" ? "kg" : e.modes === "band" ? "band" : e.type, modes: e.modes === "kg" || e.modes === "band" ? e.modes : "both", incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
-    warmBand: e.warmBand || HZ.SCAP, warmKgScap: !!e.warmKgScap, warmBandKg: !!e.warmBandKg, kind: HZ.kindOf(e), bwBased: e.bwBased ?? e.type === "band", warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
+    warmBand: e.warmBand || HZ.SCAP, cat:(e.cat || "").trim().slice(0, 40), warmKgScap: !!e.warmKgScap, warmBandKg: !!e.warmBandKg, kind: HZ.kindOf(e), bwBased: e.bwBased ?? e.type === "band", warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
   const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null, kgMax: Number(b.kgMax) > Number(b.kg) ? Math.round(Number(b.kgMax) * 10) / 10 : null }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
   if (error){ toast(HZ.dbError(error)); return false; }
@@ -269,7 +289,7 @@ function workoutEditor(){
           const swap = other => { const go = w.stations.indexOf(other); [w.stations[gi], w.stations[go]] = [w.stations[go], w.stations[gi]]; render(); };
           return el("div", { class:"stack" },
           el("div", { class:"row", style:"flex-wrap:nowrap" }, el("span", { class:"num", style:"font-size:1.3rem;font-weight:700;min-width:1.8rem;flex:none", text: sec.key === "main" ? j+1 : HZ.stationLabels(HZ.orderStations(w.stations))[s.id] }),
-            el("select", { id:`st-ex-${s.id}`, "aria-label":"Ćwiczenie", value:s.exId || "", onchange(e){ s.exId = e.target.value; } }, S.config.exercises.map(e => el("option", { value:e.id, text:e.name }))),
+            el("select", { id:`st-ex-${s.id}`, "aria-label":"Ćwiczenie", value:s.exId || "", onchange(e){ s.exId = e.target.value; } }, exOptions(w)),
             el("button", { class:"ghost", "aria-label":"W górę", disabled:j === 0, onclick(){ swap(items[j-1]); }, text:"↑" }),
             el("button", { class:"ghost", "aria-label":"W dół", disabled:j === items.length - 1, onclick(){ swap(items[j+1]); }, text:"↓" }),
             el("button", { class:"ghost", "aria-label":"Usuń", onclick(){ w.stations.splice(gi, 1); render(); }, text:"✕" })),

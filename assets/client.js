@@ -23,7 +23,7 @@ const rirOn = () => HZ.feat("rir", C.profile);
 const custom = () => !!(S.config.features && S.config.features.custom);
 const tipFor = (w, st, exBase, mode) => HZ.trainerTip(C.plan, C.logs, exBase.id, mode)
   || HZ.suggest(HZ.dropRejected(C.logs, C.appr), exBase.id, mode, custom() ? HZ.progEx(exBase, C.profile.progression) : exBase, w.id, rirOn() ? HZ.targetRir(w, st) : null);
-const isLocked = w => !!(S.config.features && S.config.features.requireStart) && !(C.profile && C.profile.is_admin) && w.open !== true;
+const isLocked = w => !!(S.config.features && S.config.features.requireStart) && w.open !== true;   // trainer's account too (results for clients go through the panel)
 
 async function loadAll(){
   const uid = C.session.user.id;
