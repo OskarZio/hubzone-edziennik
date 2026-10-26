@@ -149,6 +149,37 @@ HZ.applyTheme = () => {
 HZ.setTheme = patch => { const t = { ...HZ.getTheme(), ...patch }; try { localStorage.setItem("hz-theme", JSON.stringify(t)); } catch(e){} HZ.applyTheme(); };
 try { HZ.applyTheme(); if (window.matchMedia) matchMedia("(prefers-color-scheme: dark)").addEventListener("change", HZ.applyTheme); } catch(e){}
 
+/* ---------- install as an app (Android: install button, iPhone: Share → Add to Home Screen) ---------- */
+HZ.install = { prompt:null, listeners:[] };
+try { if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {}); } catch(e){}
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); HZ.install.prompt = e; HZ.install.listeners.forEach(f => f()); });
+window.addEventListener("appinstalled", () => { HZ.install.prompt = null; HZ.install.done = true; HZ.install.listeners.forEach(f => f()); });
+HZ.isStandalone = () => { try { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch(e){ return false; } };
+HZ.platform = () => { const ua = navigator.userAgent || "";
+  if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "ios";
+  return /Android/.test(ua) ? "android" : "desktop"; };
+HZ.installCard = (rerender, { compact = false, title = "Aplikacja na telefonie", onClose = null } = {}) => {
+  if (HZ.isStandalone() || HZ.install.done) return null;
+  if (rerender && !HZ.install.hooked){ HZ.install.hooked = true; HZ.install.listeners.push(rerender); }
+  const pf = HZ.platform(), pr = HZ.install.prompt;
+  const steps = pf === "ios"
+    ? el("ol", { class:"small", style:"margin:0;padding-left:1.2em;display:grid;gap:4px" },
+        el("li", {}, "Stuknij ", el("b", { text:"Udostępnij" }), " (kwadrat ze strzałką ⬆︎) na dole Safari."),
+        el("li", {}, "Przewiń i wybierz ", el("b", { text:"„Do ekranu początkowego”" }), "."),
+        el("li", {}, "Stuknij ", el("b", { text:"„Dodaj”" }), " – ikona Hubzone pojawi się na pulpicie."))
+    : pf === "android"
+      ? el("p", { class:"small", style:"margin:0" }, "Otwórz menu przeglądarki ", el("b", { text:"⋮" }), " i wybierz ", el("b", { text:"„Zainstaluj aplikację”" }), " albo ", el("b", { text:"„Dodaj do ekranu głównego”" }), ".")
+      : el("p", { class:"small", style:"margin:0", text:"Na telefonie otwórz tę stronę i dodaj ją do ekranu głównego. Na komputerze w Chrome lub Edge kliknij ikonę instalacji w pasku adresu." });
+  return el("div", { class:"card install" + (compact ? " compact" : "") },
+    el("div", { class:"row between", style:"flex-wrap:nowrap;align-items:flex-start" },
+      el("div", { class:"row", style:"flex-wrap:nowrap;gap:10px" }, el("img", { src:"assets/icons/icon-192.png", alt:"", width:"40", height:"40", style:"border-radius:10px;flex:none" }),
+        el("div", { class:"stack", style:"gap:2px" }, el("b", { text:title }), el("span", { class:"small muted", text:"Ikona na pulpicie, pełny ekran, szybkie wejście na treningu." }))),
+      onClose ? el("button", { class:"ghost", "aria-label":"Zamknij", onclick: onClose, text:"✕" }) : null),
+    pr ? el("button", { class:"primary", async onclick(){ pr.prompt(); try { const r = await pr.userChoice; if (r && r.outcome === "accepted") HZ.toast("Instaluję aplikację…"); } catch(e){} HZ.install.prompt = null; if (rerender) rerender(); }, text:"📲 Pobierz aplikację" })
+      : steps,
+    pf === "ios" ? el("span", { class:"small muted", text:"Na iPhonie działa w Safari (oraz w Chrome od iOS 16.4)." }) : null);
+};
+
 /* ---------- DOM helpers ---------- */
 const SVGNS = "http://www.w3.org/2000/svg";
 function el(tag, props, ...kids){

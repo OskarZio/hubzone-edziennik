@@ -208,7 +208,7 @@ function settingsView(){
       el("button", { async onclick(){ const n = Math.max(0, Math.min(20, parseInt(limIn.value, 10) || 0));
         const { error } = await HZ.api.setGuestLimit(n); if (error){ toast(HZ.dbError(error)); return; }
         S.config.guestLimit = n; toast(n ? `Gość musi założyć konto po ${n} ${HZ.plural(n, "treningu", "treningach", "treningach")}` : "Bez limitu dla gości"); render(); }, text:"Zapisz" })));
-  return [exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
+  return [HZ.installCard(render, { title:"Panel trenera jako aplikacja" }), exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 /* exercise categories (e.g. Weightlifting, Handstand): sorted lists, every exercise still available everywhere */
 const exCats = list => [...new Set(list.map(e => (e.cat || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));

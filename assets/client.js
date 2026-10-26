@@ -52,13 +52,13 @@ async function loadAll(){
 
 function view(){
   if (!HZ.ready) return [header(), ...HZ.setupNeeded()];
-  if (!C.session && C.authMode === "guest") return [header(), el("div", { class:"auth" }, guestForm()), HZ.footer()];
+  if (!C.session && C.authMode === "guest") return [header(), el("div", { class:"auth" }, guestForm(), HZ.platform() !== "desktop" ? HZ.installCard(render, { compact:true }) : null), HZ.footer()];
   if (!C.session) return [header(), el("div", { class:"auth" },
     C.authMode === "login" ? el("div", { class:"card guest-cta" }, el("div", { class:"stack", style:"gap:2px" }, el("h3", { text:"Pierwszy raz na zajęciach?" }),
         el("span", { class:"small muted", text:"Wejdź jako gość: tylko imię, bez e-maila i hasła. Konto założysz później, wyniki zostaną." })),
       el("button", { class:"primary", onclick(){ C.authMode = "guest"; render(); }, text:"Wejdź jako gość" })) : null,
     HZ.authView({ mode:C.authMode, allowRegister:true, onMode: m => { C.authMode = m; render(); },
-    sub: C.authMode === "register" ? (HZ.inviteCode ? "Kod klubu jest już wpisany z zaproszenia." : "Kod klubu dostaniesz od trenera na zajęciach.") : C.authMode === "login" ? "Masz już konto? Zaloguj się." : null }))];
+    sub: C.authMode === "register" ? (HZ.inviteCode ? "Kod klubu jest już wpisany z zaproszenia." : "Kod klubu dostaniesz od trenera na zajęciach.") : C.authMode === "login" ? "Masz już konto? Zaloguj się." : null }), HZ.platform() !== "desktop" ? HZ.installCard(render, { compact:true }) : null)];
   if (!C.loaded) return [header(), el("div", { class:"empty", text:"Wczytuję Twój dziennik…" })];
   if (C.error) return [header(), el("div", { class:"empty" }, el("p", { text:C.error }), el("button", { onclick(){ C.loaded = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
   if (!C.profile) return [header(), joinCard()];
@@ -198,6 +198,7 @@ function todayView(){
     pick)];
   if (w.note) out.push(el("p", { class:"muted", text:w.note }));
   if (custom() && C.profile.task) out.push(el("div", { class:"notice" }, el("b", { text:"Zadanie od trenera: " }), C.profile.task));
+  if (HZ.platform() !== "desktop" && !HZ.LS.get("hz-install-hide")) { const ic = HZ.installCard(render, { compact:true, title:"Dodaj Hubzone do pulpitu", onClose(){ HZ.LS.set("hz-install-hide", true); render(); } }); if (ic) out.push(ic); }
   if (C.profile.guest) out.unshift(guestBanner());
   else { const msg = C.rankRows && HZ.myRankMessage(C.rankRows, C.session.user.id) || HZ.personalMessage(C.logs); if (msg) out.unshift(HZ.motivationBox(msg)); }
   const labels = HZ.stationLabels(HZ.orderStations(w.stations || []));
@@ -408,6 +409,7 @@ function accountView(){
     el("div", { class:"card" }, el("h3", { text:"Masa ciała (opcjonalnie)" }),
       bwForm("Służy tylko do rankingu siły względnej (% masy ciała). Widzisz ją Ty i trener, inni tylko procenty."),
       C.profile.consent && C.profile.consent.health ? el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ saveConsent({ health:false }, "Usunięto masę ciała i wycofano zgodę"); }, text:"Wycofaj zgodę i usuń masę ciała" }) : null),
+    HZ.installCard(render),
     HZ.themeCard(render),
     privacyCard(),
     C.profile.guest ? null : el("div", { class:"card" }, el("h3", { text:"Zmień hasło" }), el("p", { class:"small muted", text:"Wyślemy na Twój e-mail link do ustawienia nowego hasła." }),

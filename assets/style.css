@@ -252,3 +252,7 @@ table.rank td .medal.sm{ vertical-align:middle; }
 .chip.k-heavy{ box-shadow:inset 3px 0 0 #2f9e44; } .chip.k-light{ box-shadow:inset 3px 0 0 #e03131; }
 .legend summary{ cursor:pointer; font-weight:700; }
 .legend ol{ margin:8px 0 0; padding-left:1.2em; display:grid; gap:4px; }
+
+/* install as app */
+.card.install{ border-color:var(--accent); }
+.card.install.compact{ padding:12px; gap:8px; }
