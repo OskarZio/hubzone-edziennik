@@ -205,6 +205,9 @@ label.consent span{line-height:1.35}
 .pod.p3{ box-shadow:0 0 0 2px #c98a50 inset; }
 table.rank td .medal.sm{ vertical-align:middle; }
 
+/* iPhone / Safari: overflow:hidden + border-radius does not clip an animated child -> clip the medal to a circle explicitly */
+.medal{ clip-path:circle(50% at 50% 50%); -webkit-mask-image:-webkit-radial-gradient(white, black); transform:translateZ(0); box-shadow:inset 0 0 0 3px rgba(255,255,255,.55); }
+.medal.sm{ box-shadow:inset 0 0 0 2px rgba(255,255,255,.55); }
 /* ---------- HOLOGRAPHIC SHINE (to remove: delete this block, or switch it off in the trainer panel) ---------- */
 .medal::after{ content:""; position:absolute; inset:-40%; z-index:-1; mix-blend-mode:overlay; opacity:.85;
   background:conic-gradient(from 0deg, #ff6ad5, #c774e8, #ad8cff, #8795e8, #94d0ff, #7cffcb, #fffb96, #ff6ad5);
