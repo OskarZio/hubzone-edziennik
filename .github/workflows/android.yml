@@ -1,0 +1,31 @@
+name: Android APK
+on:
+  push:
+    branches: [main]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.7" }
+      - name: Signing key (optional secret)
+        env: { KS: "${{ secrets.HZ_KEYSTORE_B64 }}" }
+        run: |
+          if [ -n "$KS" ]; then echo "$KS" | base64 -d > "$RUNNER_TEMP/hz.jks"; echo "HZ_KEYSTORE_FILE=$RUNNER_TEMP/hz.jks" >> "$GITHUB_ENV"; echo "own key"; else echo "no key secret - test key"; fi
+      - name: Build APK
+        working-directory: android
+        env: { HZ_KEYSTORE_PASS: "${{ secrets.HZ_KEYSTORE_PASS }}" }
+        run: gradle assembleRelease --no-daemon
+      - name: Publish to release "android"
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk hubzone.apk
+          gh release view android >/dev/null 2>&1 || gh release create android --title "Hubzone – aplikacja na Androida" --notes "Plik hubzone.apk: pobierz na telefonie i zainstaluj (zezwól na instalację z tej przeglądarki)."
+          gh release upload android hubzone.apk --clobber

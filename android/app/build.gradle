@@ -1,0 +1,29 @@
+plugins { id 'com.android.application' }
+
+def run = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInteger()
+def ks = System.getenv("HZ_KEYSTORE_FILE")
+
+android {
+  namespace 'pl.hubzone.edziennik'
+  compileSdk 34
+  defaultConfig {
+    applicationId 'pl.hubzone.edziennik'
+    minSdk 24
+    targetSdk 34
+    versionCode run
+    versionName "1." + run
+  }
+  signingConfigs {
+    release {
+      if (ks) { storeFile file(ks); storePassword System.getenv("HZ_KEYSTORE_PASS"); keyAlias "hubzone"; keyPassword System.getenv("HZ_KEYSTORE_PASS") }
+    }
+  }
+  buildTypes {
+    release {
+      minifyEnabled false
+      // own key from GitHub secrets (updates install over the old app); without it a test key is used
+      signingConfig ks ? signingConfigs.release : signingConfigs.debug
+    }
+  }
+  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}

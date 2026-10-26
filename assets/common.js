@@ -154,7 +154,8 @@ HZ.install = { prompt:null, listeners:[] };
 try { if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {}); } catch(e){}
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); HZ.install.prompt = e; HZ.install.listeners.forEach(f => f()); });
 window.addEventListener("appinstalled", () => { HZ.install.prompt = null; HZ.install.done = true; HZ.install.listeners.forEach(f => f()); });
-HZ.isStandalone = () => { try { return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch(e){ return false; } };
+HZ.APK_URL = "https://github.com/OskarZio/hubzone-edziennik/releases/download/android/hubzone.apk";
+HZ.isStandalone = () => { try { return /HubzoneApp/.test(navigator.userAgent) || matchMedia("(display-mode: standalone)").matches || navigator.standalone === true; } catch(e){ return false; } };
 HZ.platform = () => { const ua = navigator.userAgent || "";
   if (/iPhone|iPad|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) return "ios";
   return /Android/.test(ua) ? "android" : "desktop"; };
@@ -175,6 +176,8 @@ HZ.installCard = (rerender, { compact = false, title = "Aplikacja na telefonie",
       el("div", { class:"row", style:"flex-wrap:nowrap;gap:10px" }, el("img", { src:"assets/icons/icon-192.png", alt:"", width:"40", height:"40", style:"border-radius:10px;flex:none" }),
         el("div", { class:"stack", style:"gap:2px" }, el("b", { text:title }), el("span", { class:"small muted", text:"Ikona na pulpicie, pełny ekran, szybkie wejście na treningu." }))),
       onClose ? el("button", { class:"ghost", "aria-label":"Zamknij", onclick: onClose, text:"✕" }) : null),
+    pf === "android" ? el("a", { class:"btn" + (pr ? "" : " primary"), href:HZ.APK_URL, rel:"noopener", text:"⬇️ Pobierz plik APK (Android)" }) : null,
+    pf === "android" ? el("span", { class:"small muted", text:"Po pobraniu otwórz plik i zezwól na instalację z tej przeglądarki. Możesz też dodać stronę do ekranu głównego:" }) : null,
     pr ? el("button", { class:"primary", async onclick(){ pr.prompt(); try { const r = await pr.userChoice; if (r && r.outcome === "accepted") HZ.toast("Instaluję aplikację…"); } catch(e){} HZ.install.prompt = null; if (rerender) rerender(); }, text:"📲 Pobierz aplikację" })
       : steps,
     pf === "ios" ? el("span", { class:"small muted", text:"Na iPhonie działa w Safari (oraz w Chrome od iOS 16.4)." }) : null);
