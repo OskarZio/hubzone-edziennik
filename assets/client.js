@@ -406,7 +406,7 @@ function onboarding(){
       ["Kliknij ", el("b", { text:"„Wyślij wyniki do trenera”" }), "."],
       ["Zapomnisz wysłać? Trener i tak zobaczy Twoją ", el("b", { text:"wersję roboczą" }), "."]]),
     tip("🏆", "Postępy i ranking", [[el("b", { text:"Postępy" }), " – wykresy, rekordy i ile więcej podnosisz od startu."],
-      [el("b", { text:"Ranking" }), " – punkty za regularność i postęp, co miesiąc od nowa. " + ((C.profile.consent && C.profile.consent.ranking) || C.onbRank ? "Jesteś w rankingu." : "Nie jesteś w rankingu – zmienisz to w Konto.")],
+      [el("b", { text:"Ranking" }), " – punkty za regularność i postęp, miesięczny (co miesiąc od nowa) i ogólny (cały czas). " + ((C.profile.consent && C.profile.consent.ranking) || C.onbRank ? "Jesteś w rankingu." : "Nie jesteś w rankingu – zmienisz to w Konto.")],
       [el("b", { text:"Konto" }), " – zgody, motyw, Twoje dane i ta instrukcja. Dodaj aplikację do ekranu głównego!"]])];
   const shown = consentDone ? slides : [slide0];
   let idx = Math.min(C.onb, shown.length - 1);

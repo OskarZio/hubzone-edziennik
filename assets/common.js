@@ -779,7 +779,7 @@ HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, pending, repPr
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [
-  ["points", "Pkt ogólne", r => r.points ?? 0],
+  ["points", "Punkty", r => r.points ?? 0],
   ["strength", "Pkt siłowe", r => r.strength ?? 0],
   ["workouts", "Treningi", r => r.workouts ?? 0],
   ["streak", "Seria", r => r.streak ?? 0],
@@ -788,7 +788,7 @@ const RANK_COLS = [
   ["volume", "Tonaż", r => fmtVol(r.volume || 0)]
 ];
 const BOARDS = [
-  { key:"points", label:"Ogólny", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
+  { key:"points", label:"Regularność", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
   { key:"rel", label:"Siła", desc:"Siła względna: największy ciężar roboczy jako % masy ciała, więc 100 kg przy 100 kg wagi to 100%, a 80 kg przy 60 kg to 133%. Domyślnie średnia z bojów głównych. Przy podciąganiu i dipach liczy się masa ciała + dociążenie. Samej masy ciała nikt nie widzi." },
   { key:"strength", label:"Postęp", desc:`Każdy porównywany sam ze sobą: ${HZ.PTS.plan} pkt za trening z wykonanym planem, ${HZ.PTS.repPr} pkt za rekord powtórzeń, ${HZ.PTS.pr} pkt za rekord ciężaru (tylko wiarygodny skok albo zatwierdzony przez trenera) + progres w % (maks. ${HZ.PTS.progressCap}).` }
 ];
@@ -856,7 +856,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   if (exSel) exSel.value = relEx;
   return [opts.message ? HZ.motivationBox(opts.message) : null, el("div", { class:"card" },
       strengthView ? null : el("div", { class:"modes", role:"group", "aria-label":"Okres" },
-        [["month", `Ten miesiąc (${HZ.monthName(mk).split(" ")[0]})`], ["all", "Od początku"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankPeriod === k), onclick(){ rankPeriod = k; rerender(); }, text:t }))),
+        [["month", "📅 Miesięczny"], ["all", "♾️ Ogólny"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankPeriod === k), onclick(){ rankPeriod = k; rerender(); }, text:t }))),
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
         BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && rankSort === "kg")), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
       el("p", { class:"small muted", text: board ? board.desc + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
@@ -866,7 +866,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
       strengthView && relEx === "main" ? el("p", { class:"small muted", text:"Liczą się boje, które trener daje w treningu głównym: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(", ") + "." }) : null,
       exSel, podium,
       me && me.place !== "–" ? el("p", { class:"small", text:`Twoje miejsce: ${me.place} z ${placed.filter(x => x.place !== "–").length}` }) : null),
-    el("div", { class:"card" }, el("h3", { text:"Tabela ogólna" }),
+    el("div", { class:"card" }, el("h3", { text: strengthView ? "Tabela" : monthMode ? `Tabela – ${HZ.monthName(mk)}` : "Tabela – cały czas" }),
       el("div", { class:"tablewrap" }, el("table", { class:"rank" },
         el("thead", {}, el("tr", {}, el("th", { text:"#" }), el("th", { text:"Imię" }),
           cols.map(([k, label]) => el("th", { class: k === rankSort ? "on" : null }, el("button", { type:"button", class:"thsort", onclick(){ rankSort = k; rerender(); }, text: label + (k === rankSort ? " ↓" : "") }))))),
