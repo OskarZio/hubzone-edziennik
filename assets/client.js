@@ -3,7 +3,10 @@
 "use strict";
 const { el, S, toast } = HZ;
 const app = document.getElementById("app");
-const C = { appr:{}, plan:{}, session:null, profile:null, logs:[], loaded:false, tab:"today", authMode: HZ.inviteCode ? "guest" : "login", sel:null, drafts:{}, own:null, error:null };
+/* trainer's preview of the first-start guide: index.html?podglad=instrukcja (nothing is saved) */
+const PREVIEW = (() => { try { const u = new URL(location.href); if (u.searchParams.get("podglad") !== "instrukcja") return false;
+  u.searchParams.delete("podglad"); history.replaceState(null, "", u.pathname + u.search + u.hash); return true; } catch(e){ return false; } })();
+const C = { preview:PREVIEW, onb: PREVIEW ? 0 : undefined, appr:{}, plan:{}, session:null, profile:null, logs:[], loaded:false, tab:"today", authMode: HZ.inviteCode ? "guest" : "login", sel:null, drafts:{}, own:null, error:null };
 
 function render(){ HZ.swap(app, view()); }
 const draftsKey = () => "hz-drafts-" + (C.session ? C.session.user.id : "x");
@@ -62,7 +65,7 @@ function view(){
   if (!C.loaded) return [header(), el("div", { class:"empty", text:"Wczytuję Twój dziennik…" })];
   if (C.error) return [header(), el("div", { class:"empty" }, el("p", { text:C.error }), el("button", { onclick(){ C.loaded = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
   if (!C.profile) return [header(), joinCard()];
-  if (!C.profile.is_admin && (!HZ.consentOk(C.profile) || !onbDone() || C.onb != null)) return [header(), onboarding(), HZ.footer()];
+  if ((C.preview && C.onb != null) || (!C.profile.is_admin && (!HZ.consentOk(C.profile) || !onbDone() || C.onb != null))) return [onboarding()];
   return [header(), HZ.tabBar([["today","Dzisiejszy trening"],["progress","Postępy"], S.config.rankingEnabled ? ["ranking","Ranking"] : null, S.config.ownEnabled ? ["own","Trening własny"] : null, ["account","Konto"]].filter(Boolean), C.tab, k => { C.tab = k; render(); }), ...body(), HZ.footer()];
 }
 function header(){
@@ -363,62 +366,75 @@ const ONB_KEY = () => "hz-onb-v1-" + (C.session ? C.session.user.id : "x");
 const onbDone = () => !!HZ.LS.get(ONB_KEY());
 function onboarding(){
   if (C.onb == null) C.onb = 0;
-  const page = C.onb, total = 3;
-  const dots = el("div", { class:"onb-dots", "aria-label":`Krok ${page + 1} z ${total}` }, [0,1,2].map(i => el("span", { class: i === page ? "on" : (i < page ? "done" : "") })));
-  const finish = () => { HZ.LS.set(ONB_KEY(), true); C.onb = null; C.tab = "today"; render(); window.scrollTo(0, 0); };
-  const nav = (next, label = "Dalej") => el("div", { class:"row between" },
-    page > 0 ? el("button", { class:"ghost", onclick(){ C.onb = page - 1; render(); window.scrollTo(0, 0); }, text:"← Wstecz" }) : el("span"),
-    el("button", { class:"primary", onclick: next, text:label }));
-  if (page === 0){
-    const c = C.profile.consent || {}; const L = HZ.legal || {};
-    if (C.onbRank === undefined) C.onbRank = HZ.consentOk(C.profile) ? !!c.ranking : null;   // new users must choose
-    if (C.onbAge === undefined) C.onbAge = HZ.consentOk(C.profile);
-    const age = el("input", { id:"onb-age", type:"checkbox", style:"width:auto;margin-top:3px", checked: C.onbAge || null, onchange(e){ C.onbAge = e.target.checked; } });
-    const pick = (v, t, sub) => el("button", { type:"button", class:"onb-choice" + (C.onbRank === v ? " on" : ""), "aria-pressed":String(C.onbRank === v), onclick(){ C.onbRank = v; render(); } },
-      el("b", { text:t }), el("span", { class:"small", text:sub }));
-    return el("div", { class:"card onb" }, dots,
-      el("h2", { text:"Witaj w e-Dzienniku Hubzone! 👋" }),
-      el("p", { class:"small", text:"Zanim zaczniesz – dwie ważne rzeczy. Zajmie to 20 sekund." }),
-      el("div", { class:"onb-box" }, el("h3", { text:"1. Twoje dane (RODO)" }),
-        el("ul", { class:"small" },
-          el("li", {}, "Administrator: ", el("b", { text: L.controller || "Hubzone Weightlifting" }), "."),
-          el("li", { text:"Zapisujemy: imię, e-mail i Twoje wyniki treningowe – po to, żeby trener prowadził Twój trening i żebyś widział/-a postępy." }),
-          el("li", { text:"Wyniki widzi tylko trener. Masę ciała podajesz dobrowolnie, za osobną zgodą." }),
-          el("li", { text:"W każdej chwili pobierzesz lub usuniesz swoje dane (Konto → Twoje dane)." })),
-        el("p", { class:"small" }, HZ.policyLink("Pełna polityka prywatności")),
-        el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, age,
-          el("span", { text:"Mam ukończone 16 lat i zapoznałem/-am się z polityką prywatności. (wymagane)" }))),
-      el("div", { class:"onb-box" + (C.onbRank == null ? " need" : "") }, el("h3", { text:"2. Czy chcesz być widoczny/-a w rankingu grupy?" }),
-        el("p", { class:"small muted", text:"Ranking pokazuje innym uczestnikom Twoje imię, liczbę treningów i postępy. Możesz to zmienić w każdej chwili w zakładce Konto." }),
-        el("div", { class:"onb-choices" },
-          pick(true, "✅ Tak, pokazuj mnie", "imię i wyniki widzą inni z grupy"),
-          pick(false, "🙈 Nie, nie pokazuj", "wyniki widzisz tylko Ty i trener"))),
-      nav(async ev => {
-        if (!age.checked){ toast("Zaznacz, że masz ukończone 16 lat i znasz politykę prywatności."); return; }
-        if (C.onbRank == null){ toast("Wybierz, czy chcesz być widoczny/-a w rankingu."); return; }
-        ev.currentTarget.disabled = true;
-        const ok = await saveConsent({ age16:true, ranking:C.onbRank }, null);
-        if (ok){ C.onb = 1; render(); window.scrollTo(0, 0); } else ev.currentTarget.disabled = false; }, "Akceptuję i dalej"));
-  }
-  if (page === 1) return el("div", { class:"card onb" }, dots,
-    el("h2", { text:"Jak wpisywać trening" }),
-    el("ol", { class:"onb-steps" },
-      el("li", {}, el("b", { text:"Dzisiejszy trening" }), " – po wejściu widzisz plan na dziś: boje i stacje."),
-      el("li", {}, el("b", { text:"Rozgrzewka (W1, W2…)" }), " – serie wstępne, nie liczą się do wyników. Wpisz ciężar serii roboczych, a aplikacja wyliczy rozgrzewkę."),
-      el("li", {}, el("b", { text:"Serie robocze" }), " – po każdej serii wpisz ciężar (albo gumę) i liczbę powtórzeń. Przycisk „bez” = bez ciężaru."),
-      el("li", {}, el("b", { text:"Podpowiedź" }), " – zielona ramka mówi, ile dołożyć. ★ oznacza zalecenie trenera."),
-      el("li", {}, el("b", { text:"„Zapisz bój”" }), " po każdym ćwiczeniu – nic nie zginie, a trener od razu widzi wynik."),
-      el("li", {}, el("b", { text:"Na koniec" }), " – zaznacz zmęczenie (1–10) i kliknij „Wyślij wyniki do trenera”.")),
-    nav(() => { C.onb = 2; render(); window.scrollTo(0, 0); }),
-    el("button", { class:"link small", style:"align-self:center", onclick: finish, text:"Pomiń instrukcję" }));
-  return el("div", { class:"card onb" }, dots,
-    el("h2", { text:"Postępy, ranking i konto" }),
-    el("ol", { class:"onb-steps" },
-      el("li", {}, el("b", { text:"Postępy" }), " – wykresy każdego ćwiczenia, rekordy i ile więcej podnosisz od startu."),
-      el("li", {}, el("b", { text:"Ranking" }), " – punkty za regularność i postęp, co miesiąc od nowa. " + (C.profile.consent && C.profile.consent.ranking ? "Jesteś w rankingu." : "Nie jesteś w rankingu – możesz to zmienić w Konto.")),
-      el("li", {}, el("b", { text:"Konto" }), " – imię, motyw, zgody, Twoje dane i ta instrukcja."),
-      el("li", {}, el("b", { text:"Na telefonie" }), " – dodaj aplikację do ekranu głównego, żeby mieć ją pod ręką (Konto → Aplikacja na telefonie).")),
-    nav(finish, "Zaczynamy 💪"));
+  const L = HZ.legal || {}, c = C.profile.consent || {};
+  const consentDone = C.preview || !!C.onbAccepted;   // slide 1 (data + ranking) must be confirmed before the tutorial
+  const finish = () => { if (C.preview){ location.href = "admin.html"; return; } HZ.LS.set(ONB_KEY(), true); C.onb = null; C.onbAccepted = undefined; C.tab = "today"; render(); window.scrollTo(0, 0); };
+  /* slides */
+  if (C.onbRank === undefined) C.onbRank = HZ.consentOk(C.profile) ? !!c.ranking : null;   // new users must choose
+  if (C.onbAge === undefined) C.onbAge = HZ.consentOk(C.profile);
+  const age = el("input", { id:"onb-age", type:"checkbox", style:"width:auto;margin-top:3px", checked: C.onbAge || null, onchange(e){ C.onbAge = e.target.checked; } });
+  const pick = (v, t, sub) => el("button", { type:"button", class:"onb-choice" + (C.onbRank === v ? " on" : ""), "aria-pressed":String(C.onbRank === v), onclick(){ C.onbRank = v; render(); } },
+    el("b", { text:t }), el("span", { class:"small", text:sub }));
+  const slide0 = el("section", { class:"onb-slide" },
+    el("div", { class:"onb-emoji", text:"👋" }), el("h2", { text:"Witaj w e-Dzienniku Hubzone!" }),
+    el("p", { class:"small", text:"Zanim zaczniesz – dwie ważne rzeczy. 20 sekund." }),
+    el("div", { class:"onb-box" }, el("h3", { text:"1. Twoje dane (RODO)" }),
+      el("ul", { class:"small" },
+        el("li", {}, "Administrator: ", el("b", { text: L.controller || "Hubzone Weightlifting" }), "."),
+        el("li", { text:"Zapisujemy: imię, e-mail i Twoje wyniki – żeby trener prowadził Twój trening, a Ty widział/-a postępy." }),
+        el("li", { text:"Wyniki widzi tylko trener. Masę ciała podajesz dobrowolnie, za osobną zgodą." }),
+        el("li", { text:"W każdej chwili pobierzesz lub usuniesz swoje dane (Konto → Twoje dane)." })),
+      el("p", { class:"small", style:"margin:0" }, HZ.policyLink("Pełna polityka prywatności")),
+      el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, age,
+        el("span", { text:"Mam ukończone 16 lat i zapoznałem/-am się z polityką prywatności. (wymagane)" }))),
+    el("div", { class:"onb-box" + (C.onbRank == null ? " need" : "") }, el("h3", { text:"2. Czy chcesz być widoczny/-a w rankingu grupy?" }),
+      el("p", { class:"small muted", style:"margin:0", text:"Inni uczestnicy zobaczą Twoje imię, liczbę treningów i postępy. Zmienisz to w każdej chwili w Konto." }),
+      el("div", { class:"onb-choices" }, pick(true, "✅ Tak, pokazuj mnie", "imię i wyniki widzą inni z grupy"), pick(false, "🙈 Nie, nie pokazuj", "widzisz je tylko Ty i trener"))));
+  const tip = (emoji, title, lines) => el("section", { class:"onb-slide" }, el("div", { class:"onb-emoji", text:emoji }), el("h2", { text:title }),
+    el("ul", { class:"onb-steps" }, lines.map(x => el("li", {}, ...x))));
+  const slides = [slide0,
+    tip("📅", "Dzisiejszy trening", [[el("b", { text:"Po wejściu" }), " widzisz plan na dziś: boje i stacje."],
+      [el("b", { text:"Rozgrzewka W1, W2…" }), " – serie wstępne, nie liczą się do wyników."],
+      ["Wpisz ", el("b", { text:"ciężar serii roboczych" }), ", a aplikacja sama wyliczy rozgrzewkę."]]),
+    tip("🏋️", "Wpisuj serie", [["Po każdej serii wpisz ", el("b", { text:"ciężar (albo gumę) i powtórzenia" }), "."],
+      [el("b", { text:"„bez”" }), " = bez ciężaru, np. dipy z masą ciała."],
+      ["Po ćwiczeniu kliknij ", el("b", { text:"„Zapisz bój”" }), " – nic nie zginie, trener od razu widzi wynik."]]),
+    tip("📈", "Ile dołożyć?", [[el("b", { text:"Zielona ramka" }), " podpowiada ciężar na dziś."],
+      ["Zrobisz cel we wszystkich seriach (np. 10) → ", el("b", { text:"dołóż ciężar i zejdź o 2 powtórzenia" }), ", potem co trening +1."],
+      [el("b", { text:"★ Trener zaleca" }), " – wtedy obowiązuje plan trenera."]]),
+    tip("✅", "Na koniec treningu", [["Zaznacz ", el("b", { text:"zmęczenie 1–10" }), " i napisz feedback, jeśli chcesz."],
+      ["Kliknij ", el("b", { text:"„Wyślij wyniki do trenera”" }), "."],
+      ["Zapomnisz wysłać? Trener i tak zobaczy Twoją ", el("b", { text:"wersję roboczą" }), "."]]),
+    tip("🏆", "Postępy i ranking", [[el("b", { text:"Postępy" }), " – wykresy, rekordy i ile więcej podnosisz od startu."],
+      [el("b", { text:"Ranking" }), " – punkty za regularność i postęp, co miesiąc od nowa. " + ((C.profile.consent && C.profile.consent.ranking) || C.onbRank ? "Jesteś w rankingu." : "Nie jesteś w rankingu – zmienisz to w Konto.")],
+      [el("b", { text:"Konto" }), " – zgody, motyw, Twoje dane i ta instrukcja. Dodaj aplikację do ekranu głównego!"]])];
+  const shown = consentDone ? slides : [slide0];
+  let idx = Math.min(C.onb, shown.length - 1);
+  const dots = el("div", { class:"onb-dots" }, slides.map((_, i) => el("span", { class: i === idx ? "on" : (i < idx ? "done" : "") })));
+  const btn = el("button", { class:"primary onb-next" });
+  const track = el("div", { class:"onb-track" }, shown);
+  const go = i => { idx = Math.max(0, Math.min(shown.length - 1, i)); C.onb = idx; track.scrollTo({ left: idx * track.clientWidth, behavior:"smooth" }); paint(); };
+  const paint = () => { [...dots.children].forEach((d, i) => d.className = i === idx ? "on" : (i < idx ? "done" : ""));
+    btn.textContent = idx === 0 && !consentDone ? "Akceptuję i dalej" : idx === shown.length - 1 ? (C.preview ? "Zakończ podgląd" : "Zaczynamy 💪") : "Dalej →";
+    skip.hidden = idx === 0 || idx === shown.length - 1; };
+  const skip = el("button", { class:"ghost onb-skip", onclick: finish, text:"Pomiń" });
+  btn.addEventListener("click", async () => {
+    if (idx === 0 && !consentDone){
+      if (!C.onbAge){ toast("Zaznacz, że masz ukończone 16 lat i znasz politykę prywatności."); return; }
+      if (C.onbRank == null){ toast("Wybierz, czy chcesz być widoczny/-a w rankingu."); return; }
+      btn.disabled = true; const ok = await saveConsent({ age16:true, ranking:C.onbRank }, null); btn.disabled = false;
+      if (ok){ C.onbAccepted = true; C.onb = 1; render(); } return;
+    }
+    if (idx === shown.length - 1) finish(); else go(idx + 1);
+  });
+  let t; track.addEventListener("scroll", () => { clearTimeout(t); t = setTimeout(() => { const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth)); if (i !== idx){ idx = i; C.onb = i; paint(); } }, 80); }, { passive:true });
+  requestAnimationFrame(() => { track.scrollLeft = idx * track.clientWidth; });
+  paint();
+  return el("div", { class:"onb-full", role:"dialog", "aria-modal":"true", "aria-label":"Instrukcja" },
+    el("div", { class:"onb-top" }, el("img", { src:"assets/icons/icon-192.png", alt:"", width:"32", height:"32", style:"border-radius:8px" }), el("b", { text:"Hubzone e-Dziennik" }), skip),
+    C.preview ? el("div", { class:"notice small", style:"margin:0 16px" }, el("b", { text:"Podgląd dla trenera" }), " – tak klient widzi instrukcję. Nic się nie zapisuje. ", el("a", { href:"admin.html", text:"Wróć do panelu" })) : null,
+    track,
+    el("div", { class:"onb-bottom" }, dots, btn));
 }
 function consentGate(){
   const c = C.profile.consent || {};
@@ -472,7 +488,7 @@ function accountView(){
       bwForm("Służy tylko do rankingu siły względnej (% masy ciała). Widzisz ją Ty i trener, inni tylko procenty."),
       C.profile.consent && C.profile.consent.health ? el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ saveConsent({ health:false }, "Usunięto masę ciała i wycofano zgodę"); }, text:"Wycofaj zgodę i usuń masę ciała" }) : null),
     el("div", { class:"card" }, el("h3", { text:"Jak korzystać z aplikacji" }), el("p", { class:"small muted", text:"Krótka instrukcja: wpisywanie serii, podpowiedzi ciężaru, postępy i ranking." }),
-      el("button", { style:"align-self:flex-start", onclick(){ C.onb = 1; render(); window.scrollTo(0, 0); }, text:"Pokaż instrukcję" })),
+      el("button", { style:"align-self:flex-start", onclick(){ C.onb = 1; C.onbAccepted = true; render(); }, text:"Pokaż instrukcję" })),
     HZ.installCard(render),
     HZ.themeCard(render),
     privacyCard(),

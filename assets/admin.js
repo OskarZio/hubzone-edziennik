@@ -208,7 +208,10 @@ function settingsView(){
       el("button", { async onclick(){ const n = Math.max(0, Math.min(20, parseInt(limIn.value, 10) || 0));
         const { error } = await HZ.api.setGuestLimit(n); if (error){ toast(HZ.dbError(error)); return; }
         S.config.guestLimit = n; toast(n ? `Gość musi założyć konto po ${n} ${HZ.plural(n, "treningu", "treningach", "treningach")}` : "Bez limitu dla gości"); render(); }, text:"Zapisz" })));
-  return [HZ.installCard(render, { title:"Panel trenera jako aplikacja" }), exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
+  const guideCard = el("div", { class:"card" }, el("h2", { text:"Instrukcja dla klientów" }),
+    el("p", { class:"small muted", text:"Każdy klient widzi ją raz przy pierwszym wejściu: 1) klauzula RODO i wybór widoczności w rankingu, 2) jak wpisywać trening, 3) postępy, ranking i konto. Klient może ją otworzyć ponownie w Konto." }),
+    el("a", { class:"btn primary", style:"align-self:flex-start", href:"./?podglad=instrukcja", text:"👁 Podgląd instrukcji" }));
+  return [HZ.installCard(render, { title:"Panel trenera jako aplikacja" }), guideCard, exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 /* exercise categories (e.g. Weightlifting, Handstand): sorted lists, every exercise still available everywhere */
 const exCats = list => [...new Set(list.map(e => (e.cat || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));
