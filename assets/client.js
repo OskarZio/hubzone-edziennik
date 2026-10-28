@@ -65,7 +65,7 @@ function view(){
   if (!C.loaded) return [header(), el("div", { class:"empty", text:"Wczytuję Twój dziennik…" })];
   if (C.error) return [header(), el("div", { class:"empty" }, el("p", { text:C.error }), el("button", { onclick(){ C.loaded = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
   if (!C.profile) return [header(), joinCard()];
-  if ((C.preview && C.onb != null) || (!C.profile.is_admin && (!HZ.consentOk(C.profile) || !onbDone() || C.onb != null))) return [onboarding()];
+  if ((C.onb != null && (C.preview || C.onbAccepted)) || (!C.profile.is_admin && (!HZ.consentOk(C.profile) || !onbDone() || C.onb != null))) return [onboarding()];
   return [header(), HZ.tabBar([["today","Dzisiejszy trening"],["progress","Postępy"], S.config.rankingEnabled ? ["ranking","Ranking"] : null, S.config.ownEnabled ? ["own","Trening własny"] : null, ["account","Konto"]].filter(Boolean), C.tab, k => { C.tab = k; render(); }), ...body(), HZ.footer()];
 }
 function header(){
