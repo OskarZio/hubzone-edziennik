@@ -261,3 +261,18 @@ table.rank td .medal.sm{ vertical-align:middle; }
 .card.install.compact{ padding:12px; gap:8px; }
 a.btn{ display:inline-flex; justify-content:center; align-items:center; gap:6px; padding:10px 14px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--ink); font-weight:600; text-decoration:none; }
 a.btn.primary{ background:var(--accent); color:var(--accent-ink); border-color:var(--accent); }
+
+/* first-start guide */
+.onb{ gap:14px; }
+.onb-dots{ display:flex; gap:6px; justify-content:center; }
+.onb-dots span{ width:28px; height:5px; border-radius:3px; background:var(--line); }
+.onb-dots span.on{ background:var(--accent); } .onb-dots span.done{ background:var(--accent-soft); }
+.onb-box{ border:1px solid var(--line); border-radius:12px; padding:12px; display:grid; gap:8px; }
+.onb-box h3{ margin:0; }
+.onb-box ul{ margin:0; padding-left:1.2em; display:grid; gap:4px; }
+.onb-box.need{ border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.onb-choices{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.onb-choice{ display:flex; flex-direction:column; align-items:flex-start; gap:4px; text-align:left; padding:12px; border-radius:10px; min-height:84px; }
+.onb-choice.on{ border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 2px var(--accent); }
+.onb-steps{ margin:0; padding-left:1.3em; display:grid; gap:10px; }
+@media (max-width:380px){ .onb-choices{ grid-template-columns:1fr; } }

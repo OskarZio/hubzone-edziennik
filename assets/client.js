@@ -62,7 +62,7 @@ function view(){
   if (!C.loaded) return [header(), el("div", { class:"empty", text:"Wczytuję Twój dziennik…" })];
   if (C.error) return [header(), el("div", { class:"empty" }, el("p", { text:C.error }), el("button", { onclick(){ C.loaded = false; render(); loadAll(); }, text:"Spróbuj ponownie" }))];
   if (!C.profile) return [header(), joinCard()];
-  if (!C.profile.is_admin && !HZ.consentOk(C.profile)) return [header(), consentGate(), HZ.footer()];
+  if (!C.profile.is_admin && (!HZ.consentOk(C.profile) || !onbDone() || C.onb != null)) return [header(), onboarding(), HZ.footer()];
   return [header(), HZ.tabBar([["today","Dzisiejszy trening"],["progress","Postępy"], S.config.rankingEnabled ? ["ranking","Ranking"] : null, S.config.ownEnabled ? ["own","Trening własny"] : null, ["account","Konto"]].filter(Boolean), C.tab, k => { C.tab = k; render(); }), ...body(), HZ.footer()];
 }
 function header(){
@@ -358,6 +358,68 @@ async function saveConsent(patch, okMsg){
   C.profile.consent = consent; if (patch.health === false) C.profile.bodyweight = null;
   await syncRanking(); if (okMsg) toast(okMsg); render(); return true;
 }
+/* ---------- first start: 1) data & ranking (can't be missed), 2) how to log a training, 3) progress & ranking ---------- */
+const ONB_KEY = () => "hz-onb-v1-" + (C.session ? C.session.user.id : "x");
+const onbDone = () => !!HZ.LS.get(ONB_KEY());
+function onboarding(){
+  if (C.onb == null) C.onb = 0;
+  const page = C.onb, total = 3;
+  const dots = el("div", { class:"onb-dots", "aria-label":`Krok ${page + 1} z ${total}` }, [0,1,2].map(i => el("span", { class: i === page ? "on" : (i < page ? "done" : "") })));
+  const finish = () => { HZ.LS.set(ONB_KEY(), true); C.onb = null; C.tab = "today"; render(); window.scrollTo(0, 0); };
+  const nav = (next, label = "Dalej") => el("div", { class:"row between" },
+    page > 0 ? el("button", { class:"ghost", onclick(){ C.onb = page - 1; render(); window.scrollTo(0, 0); }, text:"← Wstecz" }) : el("span"),
+    el("button", { class:"primary", onclick: next, text:label }));
+  if (page === 0){
+    const c = C.profile.consent || {}; const L = HZ.legal || {};
+    if (C.onbRank === undefined) C.onbRank = HZ.consentOk(C.profile) ? !!c.ranking : null;   // new users must choose
+    if (C.onbAge === undefined) C.onbAge = HZ.consentOk(C.profile);
+    const age = el("input", { id:"onb-age", type:"checkbox", style:"width:auto;margin-top:3px", checked: C.onbAge || null, onchange(e){ C.onbAge = e.target.checked; } });
+    const pick = (v, t, sub) => el("button", { type:"button", class:"onb-choice" + (C.onbRank === v ? " on" : ""), "aria-pressed":String(C.onbRank === v), onclick(){ C.onbRank = v; render(); } },
+      el("b", { text:t }), el("span", { class:"small", text:sub }));
+    return el("div", { class:"card onb" }, dots,
+      el("h2", { text:"Witaj w e-Dzienniku Hubzone! 👋" }),
+      el("p", { class:"small", text:"Zanim zaczniesz – dwie ważne rzeczy. Zajmie to 20 sekund." }),
+      el("div", { class:"onb-box" }, el("h3", { text:"1. Twoje dane (RODO)" }),
+        el("ul", { class:"small" },
+          el("li", {}, "Administrator: ", el("b", { text: L.controller || "Hubzone Weightlifting" }), "."),
+          el("li", { text:"Zapisujemy: imię, e-mail i Twoje wyniki treningowe – po to, żeby trener prowadził Twój trening i żebyś widział/-a postępy." }),
+          el("li", { text:"Wyniki widzi tylko trener. Masę ciała podajesz dobrowolnie, za osobną zgodą." }),
+          el("li", { text:"W każdej chwili pobierzesz lub usuniesz swoje dane (Konto → Twoje dane)." })),
+        el("p", { class:"small" }, HZ.policyLink("Pełna polityka prywatności")),
+        el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, age,
+          el("span", { text:"Mam ukończone 16 lat i zapoznałem/-am się z polityką prywatności. (wymagane)" }))),
+      el("div", { class:"onb-box" + (C.onbRank == null ? " need" : "") }, el("h3", { text:"2. Czy chcesz być widoczny/-a w rankingu grupy?" }),
+        el("p", { class:"small muted", text:"Ranking pokazuje innym uczestnikom Twoje imię, liczbę treningów i postępy. Możesz to zmienić w każdej chwili w zakładce Konto." }),
+        el("div", { class:"onb-choices" },
+          pick(true, "✅ Tak, pokazuj mnie", "imię i wyniki widzą inni z grupy"),
+          pick(false, "🙈 Nie, nie pokazuj", "wyniki widzisz tylko Ty i trener"))),
+      nav(async ev => {
+        if (!age.checked){ toast("Zaznacz, że masz ukończone 16 lat i znasz politykę prywatności."); return; }
+        if (C.onbRank == null){ toast("Wybierz, czy chcesz być widoczny/-a w rankingu."); return; }
+        ev.currentTarget.disabled = true;
+        const ok = await saveConsent({ age16:true, ranking:C.onbRank }, null);
+        if (ok){ C.onb = 1; render(); window.scrollTo(0, 0); } else ev.currentTarget.disabled = false; }, "Akceptuję i dalej"));
+  }
+  if (page === 1) return el("div", { class:"card onb" }, dots,
+    el("h2", { text:"Jak wpisywać trening" }),
+    el("ol", { class:"onb-steps" },
+      el("li", {}, el("b", { text:"Dzisiejszy trening" }), " – po wejściu widzisz plan na dziś: boje i stacje."),
+      el("li", {}, el("b", { text:"Rozgrzewka (W1, W2…)" }), " – serie wstępne, nie liczą się do wyników. Wpisz ciężar serii roboczych, a aplikacja wyliczy rozgrzewkę."),
+      el("li", {}, el("b", { text:"Serie robocze" }), " – po każdej serii wpisz ciężar (albo gumę) i liczbę powtórzeń. Przycisk „bez” = bez ciężaru."),
+      el("li", {}, el("b", { text:"Podpowiedź" }), " – zielona ramka mówi, ile dołożyć. ★ oznacza zalecenie trenera."),
+      el("li", {}, el("b", { text:"„Zapisz bój”" }), " po każdym ćwiczeniu – nic nie zginie, a trener od razu widzi wynik."),
+      el("li", {}, el("b", { text:"Na koniec" }), " – zaznacz zmęczenie (1–10) i kliknij „Wyślij wyniki do trenera”.")),
+    nav(() => { C.onb = 2; render(); window.scrollTo(0, 0); }),
+    el("button", { class:"link small", style:"align-self:center", onclick: finish, text:"Pomiń instrukcję" }));
+  return el("div", { class:"card onb" }, dots,
+    el("h2", { text:"Postępy, ranking i konto" }),
+    el("ol", { class:"onb-steps" },
+      el("li", {}, el("b", { text:"Postępy" }), " – wykresy każdego ćwiczenia, rekordy i ile więcej podnosisz od startu."),
+      el("li", {}, el("b", { text:"Ranking" }), " – punkty za regularność i postęp, co miesiąc od nowa. " + (C.profile.consent && C.profile.consent.ranking ? "Jesteś w rankingu." : "Nie jesteś w rankingu – możesz to zmienić w Konto.")),
+      el("li", {}, el("b", { text:"Konto" }), " – imię, motyw, zgody, Twoje dane i ta instrukcja."),
+      el("li", {}, el("b", { text:"Na telefonie" }), " – dodaj aplikację do ekranu głównego, żeby mieć ją pod ręką (Konto → Aplikacja na telefonie).")),
+    nav(finish, "Zaczynamy 💪"));
+}
 function consentGate(){
   const c = C.profile.consent || {};
   const age = el("input", { id:"cg-age", type:"checkbox", style:"width:auto;margin-top:3px" });
@@ -409,6 +471,8 @@ function accountView(){
     el("div", { class:"card" }, el("h3", { text:"Masa ciała (opcjonalnie)" }),
       bwForm("Służy tylko do rankingu siły względnej (% masy ciała). Widzisz ją Ty i trener, inni tylko procenty."),
       C.profile.consent && C.profile.consent.health ? el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ saveConsent({ health:false }, "Usunięto masę ciała i wycofano zgodę"); }, text:"Wycofaj zgodę i usuń masę ciała" }) : null),
+    el("div", { class:"card" }, el("h3", { text:"Jak korzystać z aplikacji" }), el("p", { class:"small muted", text:"Krótka instrukcja: wpisywanie serii, podpowiedzi ciężaru, postępy i ranking." }),
+      el("button", { style:"align-self:flex-start", onclick(){ C.onb = 1; render(); window.scrollTo(0, 0); }, text:"Pokaż instrukcję" })),
     HZ.installCard(render),
     HZ.themeCard(render),
     privacyCard(),
