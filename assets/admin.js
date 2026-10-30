@@ -73,7 +73,7 @@ function body(){
         for (const c of A.clients.filter(c => consent.has(c.id))){
           const logs = (A.allLogs || []).filter(l => l.user_id === c.id); if (!logs.length) continue;
           const old = byId.get(c.id) || {};
-          const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null), hidden: old.hidden === true };
+          const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear), hidden: old.hidden === true };
           const { updatedAt, id, ...prev } = old;
           if (JSON.stringify(prev) === JSON.stringify(row)) continue;
           const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() });
@@ -466,14 +466,14 @@ async function saveEntry(btn){
 async function syncManualRanking(c, logs){
   const cs = c.consent || {};
   if (!cs.ranking){ await HZ.api.deleteRanking(c.id); return; }
-  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankFull(logs || [], A.appr || {}, cs.health ? c.bodyweight : null), hidden:false, updatedAt:new Date().toISOString() });
+  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankFull(logs || [], A.appr || {}, cs.health ? c.bodyweight : null, c.birthYear), hidden:false, updatedAt:new Date().toISOString() });
   if (rk.error) toast("Ranking się nie zaktualizował: opublikuj nowe reguły w Firebase.");
 }
 async function setManualConsent(c, patch, extra = {}){
   const consent = HZ.makeConsent(c.consent, { ...patch, by:"trener" });
   const { error } = await HZ.api.updateProfile(c.id, { consent, ...extra });
   if (error){ toast(error.code === "permission-denied" ? "Opublikuj nowe reguły w Firebase (Firestore → Rules)." : HZ.dbError(error)); return false; }
-  c.consent = consent; Object.assign(c, extra.bodyweight !== undefined ? { bodyweight:extra.bodyweight } : {});
+  c.consent = consent; Object.assign(c, extra.bodyweight !== undefined ? { bodyweight:extra.bodyweight } : {}, extra.birthYear !== undefined ? { birthYear:extra.birthYear } : {});
   const logs = A.clientId === c.id && A.clientLogs ? A.clientLogs : ((await HZ.api.logsOf(c.id)).data || []);
   await syncManualRanking(c, logs); A.rankRows = null; return true;
 }
@@ -512,11 +512,14 @@ function clientsView(){
         c.manual ? el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rkIn, el("span", { text:"Klient zgodził się na udział w rankingu grupy." })) : null,
         c.manual ? null : el("p", { class:"small muted", style:"margin:0", text: c.bodyweight ? `Aktualnie: ${HZ.fmtKg(c.bodyweight)} kg${cs.by === "trener" ? " (wpisane przez Ciebie)" : " (wpisał/-a klient)"}.` : "Klient może wpisać wagę sam (Konto) albo wpisz ją tutaj, jeśli zgodził się ustnie." }),
         el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hcIn, el("span", { text:"Klient wyraził wyraźną zgodę na przetwarzanie masy ciała (dane o zdrowiu) do rankingu siły względnej." })),
-        el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn,
+        el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn, el("span", { class:"small", text:"Rok ur.:" }),
+          el("input", { id:"cl-by", inputmode:"numeric", maxlength:"4", placeholder:"1990", value: c.birthYear ? String(c.birthYear) : "", style:"max-width:5rem;text-align:center" }),
           el("button", { async onclick(){ const v = HZ.parseNum(bwIn.value); if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg."); return; }
             if (v != null && !hcIn.checked){ toast("Zaznacz, że klient zgodził się na przetwarzanie masy ciała."); return; }
             const bw = v == null || !hcIn.checked ? null : Math.round(v * 10) / 10;
-            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })));
+            const byv = document.getElementById("cl-by").value.trim(), by = byv ? parseInt(byv, 10) : null;
+            if (by != null && !(by >= 1920 && by <= new Date().getFullYear() - 16)){ toast("Wpisz rok urodzenia, np. 1990 (16+)."); return; }
+            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw, birthYear:by })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })));
     const advBar = c.manual ? null : el("label", { class:"row small", style:"flex-wrap:nowrap;cursor:pointer;gap:8px" },
       el("input", { id:"cl-adv", type:"checkbox", style:"width:auto", checked: c.advanced || null, async onchange(ev){ const on = ev.target.checked; const { error } = await HZ.api.setAdvanced(c.id, on);
         if (error){ ev.target.checked = !on; toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; } c.advanced = on; toast(on ? "Klient zaawansowany: widzi funkcje „dla zaawansowanych”" : "Zwykły widok klienta"); render(); } }),

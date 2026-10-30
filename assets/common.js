@@ -28,7 +28,7 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
@@ -770,12 +770,15 @@ HZ.progEx = (ex, prog) => { if (!ex || !prog || prog === "std") return ex; const
 HZ.monthKey = () => HZ.todayISO().slice(0, 7);
 HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
 /* full ranking row: all-time + this month */
-HZ.rankFull = (logs, appr, bw) => {
+HZ.rankFull = (logs, appr, bw, birthYear) => {
   const all = HZ.computeStats(logs, appr), k = HZ.monthKey(), m = HZ.computeStats(logs, appr, { from:k + "-01" });
-  return { ...HZ.rankRow(all, bw), m:{ k, points:m.points, strength:m.strength, workouts:m.workouts, prs:m.prs } };
+  return { ...HZ.rankRow(all, bw), af: HZ.ageFactor(HZ.ageOf(birthYear)), m:{ k, points:m.points, strength:m.strength, workouts:m.workouts, prs:m.prs } };
 };
 /* relative strength: best working weight as % of body weight; bodyweight exercises (pull-ups, dips) count body + added load */
 HZ.isBwExercise = ex => ex ? (ex.bwBased ?? ex.type === "band") : false;
+/* age multiplier (simplified, like masters weightlifting): up to 35 → ×1.00, 36–50 → +1%/year, over 50 → +1.5%/year (max ×1.70) */
+HZ.ageOf = by => by ? new Date().getFullYear() - by : null;
+HZ.ageFactor = age => { if (!(age > 35)) return 1; const f = age <= 50 ? 1 + (age - 35) * 0.01 : 1.15 + (age - 50) * 0.015; return Math.round(Math.min(1.7, f) * 1000) / 1000; };
 HZ.relStrength = (bests, bw, assist = {}) => { const out = {}; if (!(bw > 0)) return out;
   for (const [id, kg] of Object.entries(bests || {})){ const ex = HZ.exById(id); out[id] = Math.round((HZ.isBwExercise(ex) ? bw + kg : kg) / bw * 100); }
   // pull-ups / dips with a band: body weight minus the band's help (only if never done without/with added weight)
@@ -841,18 +844,20 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
     return b[relEx] > 0 ? b[relEx] : null; };
   const relCol = ["rel", "% MC", r => relOf(r) != null ? relOf(r) + "%" : "–"];
   const kgCol = ["kg", relEx === "main" ? "Suma kg" : "Ciężar", r => kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : "–"];
-  const strengthView = rankSort === "rel" || rankSort === "kg";
+  const strengthView = rankSort === "rel" || rankSort === "kg" || rankSort === "adj";
+  const adjOf = r => relOf(r) != null ? Math.round(relOf(r) * (r.af || 1)) : null;
+  const adjCol = ["adj", "Z mnożn.", r => adjOf(r) != null ? adjOf(r) + " pkt" + ((r.af || 1) > 1 ? ` (×${String(r.af).replace(".", ",")})` : "") : "–"];
   const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
   const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (r.m[k] || 0) : 0) : r[k];
   const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l]) => [k, l, r => field(r, k) ?? 0]) : RANK_COLS;
-  const cols = strengthView ? [relCol, kgCol, ...RANK_COLS] : baseCols;
-  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (field(r, rankSort) == null ? -Infinity : field(r, rankSort));
+  const cols = strengthView ? [relCol, adjCol, kgCol, ...RANK_COLS] : baseCols;
+  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "adj" ? (adjOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (field(r, rankSort) == null ? -Infinity : field(r, rankSort));
   const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((field(b, "points")||0) - (field(a, "points")||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
   const placed = sorted.map((r, i) => { if (val(r) !== prev){ place = i + 1; prev = val(r); } return { r, place: val(r) === -Infinity ? "–" : place }; });
   if (!cols.some(c => c[0] === rankSort)) rankSort = "points";
   const col = cols.find(c => c[0] === rankSort) || cols[0];
-  const board = BOARDS.find(b => b.key === (rankSort === "kg" ? "rel" : rankSort));
+  const board = BOARDS.find(b => b.key === (rankSort === "kg" || rankSort === "adj" ? "rel" : rankSort));
   const podiumRows = placed.filter(x => x.place !== "–").slice(0, 3);
   const podium = podiumRows.length ? el("div", { class:"podium" }, podiumRows.map(({ r, place }) => el("div", { class:"pod p" + place + (r.id === meId ? " me" : "") },
     HZ.medal(place), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") + (rankSort === "kg" && relOf(r) != null ? ` · ${relOf(r)}%` : rankSort === "rel" && kgOf(r) != null ? ` · ${HZ.fmtKg(kgOf(r))} kg` : "") }))))
@@ -865,11 +870,11 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
       strengthView ? null : el("div", { class:"modes", role:"group", "aria-label":"Okres" },
         [["month", "📅 Miesięczny"], ["all", "♾️ Ogólny"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankPeriod === k), onclick(){ rankPeriod = k; rerender(); }, text:t }))),
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
-        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && rankSort === "kg")), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
-      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
+        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && (rankSort === "kg" || rankSort === "adj"))), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
+      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "adj" ? " Z mnożnikiem: % masy ciała × mnożnik wieku (do 35 lat ×1, 36–50 lat +1% za rok, powyżej 50 +1,5% za rok), żeby starsi rywalizowali uczciwie. Wiek widzi tylko zawodnik i trener." : "") + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
       opts.relPrompt && strengthView ? opts.relPrompt : null,
       strengthView ? el("div", { class:"modes", role:"group", "aria-label":"Sortuj według" },
-        [["rel","% masy ciała"],["kg","Ciężar (kg)"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankSort === k), onclick(){ rankSort = k; rerender(); }, text:t }))) : null,
+        [["rel","% masy ciała"],["adj","Z mnożnikiem"],["kg","Ciężar (kg)"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankSort === k), onclick(){ rankSort = k; rerender(); }, text:t }))) : null,
       strengthView && relEx === "main" ? el("p", { class:"small muted", text:"Liczą się boje, które trener daje w treningu głównym: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(", ") + "." }) : null,
       exSel, podium,
       me && me.place !== "–" ? el("p", { class:"small", text:`Twoje miejsce: ${me.place} z ${placed.filter(x => x.place !== "–").length}` }) : null),

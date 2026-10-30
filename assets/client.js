@@ -96,7 +96,7 @@ async function syncRanking(){
   if (C.profile.is_admin){ if (C.rankKey !== "admin"){ C.rankKey = "admin"; await HZ.api.deleteRanking(C.session.user.id); } return; }   // trainers are not ranked
   const c = C.profile.consent || {};
   if (!c.ranking){ if (C.rankKey !== "none"){ C.rankKey = "none"; await HZ.api.deleteRanking(C.session.user.id); if (C.rankRows) loadRanking(); } return; }   // ranking only with consent
-  const row = { name:C.profile.name || "", ...HZ.rankFull(C.logs, C.appr, c.health ? C.profile.bodyweight : null), hidden:false };
+  const row = { name:C.profile.name || "", ...HZ.rankFull(C.logs, C.appr, c.health ? C.profile.bodyweight : null, C.profile.birthYear), hidden:false };
   const key = JSON.stringify(row); if (key === C.rankKey) return;
   const { error } = await HZ.api.saveRanking(C.session.user.id, { ...row, updatedAt:new Date().toISOString() });
   if (!error){ C.rankKey = key; if (C.rankRows) loadRanking(); }
@@ -499,25 +499,30 @@ function consentGate(){
 function bwForm(hint){
   const inp = el("input", { id:"acc-bw", inputmode:"decimal", placeholder:"np. 78,5", value: C.profile && C.profile.bodyweight ? HZ.fmtKg(C.profile.bodyweight) : "", style:"max-width:7rem;text-align:center" });
   const hasHealth = !!(C.profile.consent && C.profile.consent.health);
+  const yNow = new Date().getFullYear();
+  const byIn = el("input", { id:"acc-by", inputmode:"numeric", maxlength:"4", placeholder:"np. 1990", value: C.profile.birthYear ? String(C.profile.birthYear) : "", style:"max-width:6rem;text-align:center" });
   const hc = el("input", { id:"acc-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: hasHealth || null });
   const bw = C.profile.bodyweight, st = bw ? HZ.computeStats(C.logs, C.appr) : null, rel = bw ? HZ.relStrength(st.bests, bw, st.assist) : {};
   const relTxt = Object.entries(rel).map(([id, v]) => ({ n:(HZ.exById(id) || {}).name, v })).filter(x => x.n).sort((a, b) => b.v - a.v).slice(0, 4).map(x => `${x.n} ${x.v}%`).join(" · ");
   return el("div", { class:"stack", style:"gap:6px" }, hint ? el("p", { class:"small", text:hint }) : null,
-    bw ? el("div", { class:"notice small" }, el("b", { text:`✓ Zapisana masa ciała: ${HZ.fmtKg(bw)} kg` }),
+    bw ? el("div", { class:"notice small" }, el("b", { text:`✓ Zapisana masa ciała: ${HZ.fmtKg(bw)} kg` + (C.profile.birthYear ? ` · wiek ${HZ.ageOf(C.profile.birthYear)} lat (mnożnik ×${String(HZ.ageFactor(HZ.ageOf(C.profile.birthYear))).replace(".", ",")})` : "") }),
       el("div", { text: relTxt ? "Twoja siła względna: " + relTxt : "Po pierwszym treningu z ciężarem lub podciąganiu zobaczysz tu % masy ciała." })) : null,
     el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hc,
       el("span", { text:"Wyrażam wyraźną zgodę na przetwarzanie mojej masy ciała (dane dotyczące zdrowia, art. 9 RODO) wyłącznie w celu obliczenia siły względnej w rankingu. Zgodę mogę wycofać w każdej chwili." })),
     el("div", { class:"row", style:"flex-wrap:nowrap" }, el("label", { class:"f", style:"flex:1" }, "Masa ciała (kg)", inp),
+      el("label", { class:"f", style:"flex:1" }, "Rok urodzenia (opcjonalnie)", byIn),
       el("button", { style:"align-self:flex-end", async onclick(ev){ const v = HZ.parseNum(inp.value);
+        const by = byIn.value.trim() ? parseInt(byIn.value, 10) : null;
+        if (by != null && !(by >= 1920 && by <= yNow - 16)){ toast(`Wpisz rok urodzenia, np. 1990 (aplikacja jest dla osób 16+).`); return; }
         if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg, np. 78,5."); return; }
         if (v != null && !hc.checked){ toast("Zaznacz zgodę na przetwarzanie masy ciała, żeby ją zapisać."); return; }
         ev.currentTarget.disabled = true;
         const consent = HZ.makeConsent(C.profile.consent, { health: v != null });
-        const { error } = await HZ.api.updateProfile(C.session.user.id, { bodyweight: v == null ? null : Math.round(v * 10) / 10, consent });
+        const { error } = await HZ.api.updateProfile(C.session.user.id, { bodyweight: v == null ? null : Math.round(v * 10) / 10, consent, birthYear:by });
         if (!error) C.profile.consent = consent;
         ev.currentTarget.disabled = false;
         if (error){ toast(error.code === "permission-denied" ? "Nie udało się zapisać: trener musi zaktualizować reguły bazy." : HZ.dbError(error)); return; }
-        C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
+        C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; C.profile.birthYear = by; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
 }
 function accountView(){
   const nameIn = el("input", { id:"acc-name", maxlength:"60", value:(C.profile && C.profile.name) || "" });
