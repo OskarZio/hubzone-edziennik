@@ -446,6 +446,7 @@ HZ.progressLegend = (open) => el("details", { class:"card legend", open: open ? 
     el("li", { text:"Gdy we wszystkich seriach dojdziesz do celu (np. 10), dokładasz ciężar i schodzisz o 2 powtórzenia (np. 8)." }),
     el("li", { text:"Co trening dokładasz po 1 powtórzeniu (8 → 9 → 10), aż znów zrobisz cel. Wtedy znowu dokładasz ciężar." }),
     el("li", { text:"Dwa razy z rzędu bez poprawy na tym samym ciężarze – zejdź z ciężaru (albo mocniejsza guma)." }),
+    el("li", { text:`Rekordy: pierwsze ${HZ.CALIB} treningi z ćwiczeniem to kalibracja (szukanie ciężaru). Potem rekord = wyższe szacowane maksimum (1RM), np. 60 kg × 10 to więcej niż 65 kg × 5.` }),
     el("li", { text:"Guma: słabsza guma = postęp, „bez gumy” to cel." }),
     el("li", {}, "Kolor ćwiczenia: ", el("span", { class:"kdot heavy" }), " zielony = ciężkie ćwiczenie, małe skoki; ", el("span", { class:"kdot light" }), " czerwony = większe skoki."),
     el("li", { text:"★ Trener może ustawić inny plan, np. dołożyć i dalej robić 10 powtórzeń – wtedy obowiązuje jego zalecenie." })));
@@ -691,6 +692,9 @@ HZ.POINTS = { workout:10, streak:5, pr:5 };
 /* Postęp points (balanced, so steady work counts even without a record every week):
    weight record 5 (only credible or trainer-approved), rep record at the best weight 2, training with the plan done 3, + progress % (max 30) */
 HZ.PTS = { pr:5, repPr:2, plan:3, progressCap:30 };
+HZ.CALIB = 3;   // first sessions of an exercise = finding the weight (no records)
+/* estimated one-rep max (Epley); reps above 12 are capped because the estimate gets unreliable */
+HZ.e1rm = (load, reps) => load > 0 && reps > 0 ? Math.round(load * (1 + Math.min(reps, 12) / 30) * 10) / 10 : 0;
 /* a weight record is credible when the jump over the previous best is small; bigger jumps wait for the trainer */
 HZ.recordLimit = (ex, prev) => Math.max(2 * HZ.incRange(ex || {})[1], prev * 0.1);
 HZ.apprOpts = () => { const f = (S.config && S.config.features) || {}; return { approveSince: f.approve ? (f.approveSince || "0000") : null }; };
@@ -711,8 +715,11 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   const pastAttended = past.filter(w => attended.has(w.id)).length;
   const possible = firstIdx < 0 ? 0 : past.length - firstIdx - (past.length && past[past.length-1].date === today && !attended.has(past[past.length-1].id) ? 1 : 0);
   const attendancePct = possible > 0 ? Math.round(pastAttended / possible * 100) : null;
-  // records (working sets only); a weight record counts when credible or approved
-  const best = {}, bestReps = {}, first = {}, records = {}, bests = {}, pending = [];
+  /* records (working sets only)
+     - calibration: the first HZ.CALIB sessions of an exercise are for finding the weight – no records, no progress; the best of them is the start
+     - weight exercises: a record is a higher estimated max (1RM, Epley), so 60×10 beats 65×5 and more reps on the same weight count too
+     - after calibration a big jump still waits for the trainer (or every record, if approval is on) */
+  const best = {}, bestReps = {}, bestLoad = {}, first = {}, records = {}, bests = {}, pending = [], nSess = {};
   let prs = 0, repPrs = 0, volume = 0, strength = 0;
   const since = opts.approveSince !== undefined ? opts.approveSince : HZ.apprOpts().approveSince;
   for (const l of sorted){
@@ -721,26 +728,37 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
       const e = HZ.workEntry(e0); if (!e) continue;
       const done = e.sets.filter(x => (x.reps || 0) > 0); if (!done.length) continue;
       planned++; if (HZ.judge(e).hit) hits++;
-      const t = e.type || "kg", k = e.exId + "|" + t; let v, reps, label;
-      if (t === "kg"){ v = Math.max(...done.map(x => Number(x.load) || 0)); reps = Math.max(...done.filter(x => (Number(x.load) || 0) === v).map(x => x.reps || 0));
-        label = (v === 0 ? "bez ciężaru" : `${HZ.fmtKg(v)} kg`) + ` × ${reps}`; if (here) volume += done.reduce((a,x) => a + (Number(x.load) || 0) * (x.reps || 0), 0); }
+      const t = e.type || "kg", k = e.exId + "|" + t, ex = HZ.exById(e.exId), bwEx = HZ.isBwExercise(ex);
+      let v, reps, label, top = null;
+      if (t === "kg"){ top = Math.max(...done.map(x => Number(x.load) || 0)); reps = Math.max(...done.filter(x => (Number(x.load) || 0) === top).map(x => x.reps || 0));
+        label = (top === 0 ? "bez ciężaru" : `${HZ.fmtKg(top)} kg`) + ` × ${reps}`;
+        if (bwEx) v = top;   // pull-ups / dips: added weight (reps on the same weight = rep record)
+        else { v = Math.max(...done.map(x => HZ.e1rm(Number(x.load) || 0, x.reps))); if (v > 0) label += ` (≈${HZ.fmtKg(Math.round(v * 2) / 2)} kg 1RM)`; }
+        if (here) volume += done.reduce((a,x) => a + (Number(x.load) || 0) * (x.reps || 0), 0); }
       else if (t === "band"){ const ld = HZ.workLoad(e); v = ld === "none" ? S.config.bands.length : HZ.bandIdx(ld); if (v < 0) continue; reps = Math.max(...done.map(x => x.reps || 0)); label = (ld === "none" ? "bez gumy" : HZ.bandFull(ld)) + ` × ${reps}`; }
       else { v = done.reduce((a,x) => a + (x.reps || 0), 0); reps = 0; label = `${v} powt. łącznie`; }
       const rec = { exId:e.exId, type:t, name:e.exName, label, date:l.date };
-      if (!(k in best)){ best[k] = v; bestReps[k] = reps; first[k] = v; records[k] = rec; }
+      const n = nSess[k] = (nSess[k] || 0) + 1;
+      let accepted = true;
+      if (n <= HZ.CALIB){   // calibration: just remember the best
+        if (!(k in best) || v > best[k] || (v === best[k] && reps > bestReps[k])){ best[k] = v; bestReps[k] = reps; bestLoad[k] = top; records[k] = rec; }
+        if (n === HZ.CALIB) first[k] = best[k];
+      }
       else if (v > best[k]){
         const a = ((appr[l.id] || {}).items || {})[e.stationId];
-        const needs = t === "kg" && a !== "ok" && (a === "no" || (since && (l.date || "") >= since) || v - best[k] > HZ.recordLimit(HZ.exById(e.exId), best[k]));
-        if (needs){ if (a !== "no") pending.push({ logId:l.id, stationId:e.stationId, exId:e.exId, name:e.exName, date:l.date, from:best[k], to:v, reps,
-            reason: v - best[k] > HZ.recordLimit(HZ.exById(e.exId), best[k]) ? "duży skok" : "do zatwierdzenia" }); continue; }
-        prs++; best[k] = v; bestReps[k] = reps; records[k] = rec; if (here) strength += HZ.PTS.pr;
+        const lim = HZ.recordLimit(ex, best[k]);
+        const needs = t === "kg" && a !== "ok" && (a === "no" || (since && (l.date || "") >= since) || v - best[k] > lim);
+        if (needs){ accepted = false; if (a !== "no") pending.push({ logId:l.id, stationId:e.stationId, exId:e.exId, name:e.exName, date:l.date, from:bestLoad[k] ?? 0, to:top ?? v, reps,
+            reason: v - best[k] > lim ? "duży skok" : "do zatwierdzenia" }); }
+        else { prs++; best[k] = v; bestReps[k] = reps; bestLoad[k] = top; records[k] = rec; if (here) strength += HZ.PTS.pr; }
       }
       else if (v === best[k] && reps > bestReps[k] && t !== "bw"){ bestReps[k] = reps; repPrs++; records[k] = rec; if (here) strength += HZ.PTS.repPr; }
-      // body-weight exercises (pull-ups, dips) count from 0 kg = body weight only
-      if (t === "kg" && (best[k] > 0 || (best[k] === 0 && HZ.isBwExercise(HZ.exById(e.exId))))) bests[e.exId] = Math.max(bests[e.exId] || 0, best[k]);
+      // heaviest working weight for the strength ranking; body-weight exercises count from 0 kg = body weight only
+      if (accepted && t === "kg" && (top > 0 || (top === 0 && bwEx))) bests[e.exId] = Math.max(bests[e.exId] ?? 0, top);
     }
     if (here && !l.own && planned && hits / planned >= 0.8) strength += HZ.PTS.plan;
   }
+  const calibrating = Object.entries(nSess).filter(([, n]) => n < HZ.CALIB).map(([k, n]) => ({ exId:k.split("|")[0], name:(HZ.exById(k.split("|")[0]) || {}).name || "", n }));
   // band-assisted body-weight exercises: lightest band reached = least help in kg (for % of body weight)
   const assist = {};
   for (const k of Object.keys(best).filter(x => x.endsWith("|band"))){ const id = k.split("|")[0]; if (!HZ.isBwExercise(HZ.exById(id))) continue;
@@ -752,7 +770,7 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   return {
     workouts:attended.size, streak, longest, prs, repPrs, progress, volume: Math.round(volume),
     points: attended.size * HZ.POINTS.workout + bonus, strength,
-    attendancePct, records: Object.values(records), bests, assist, pending
+    attendancePct, records: Object.values(records), bests, assist, pending, calibrating
   };
 };
 /* entries the trainer rejected don't drive the next suggestion */
@@ -797,7 +815,7 @@ HZ.relStrength = (bests, bw, assist = {}) => { const out = {}; if (!(bw > 0)) re
   for (const [id, a] of Object.entries(assist || {})) if (out[id] == null) out[id] = Math.max(1, Math.round((bw - a) / bw * 100));
   return out; };
 /* what goes to the shared ranking: body weight itself never leaves the profile, only the percentages */
-HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, assist, pending, repPrs, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw, assist) }; };
+HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, assist, pending, repPrs, calibrating, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw, assist) }; };
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [
@@ -812,7 +830,7 @@ const RANK_COLS = [
 const BOARDS = [
   { key:"points", label:"Regularność", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
   { key:"rel", label:"Siła", desc:"Punkty siły = podniesiony ciężar × współczynnik masy ciała i płci (IPF GL, jak w trójboju) × mnożnik wieku. Przy podciąganiu i dipach liczy się masa ciała + dociążenie (na gumie: minus pomoc gumy). Dzięki temu lżejsi, cięższi, kobiety, mężczyźni i starsi rywalizują na równych zasadach. „Razem” to suma z bojów głównych, więc wygrywa najbardziej wszechstronny. Wagę, wiek i płeć widzi tylko zawodnik i trener." },
-  { key:"strength", label:"Postęp", desc:`Każdy porównywany sam ze sobą: ${HZ.PTS.plan} pkt za trening z wykonanym planem, ${HZ.PTS.repPr} pkt za rekord powtórzeń, ${HZ.PTS.pr} pkt za rekord ciężaru (tylko wiarygodny skok albo zatwierdzony przez trenera) + progres w % (maks. ${HZ.PTS.progressCap}).` }
+  { key:"strength", label:"Postęp", desc:`Każdy porównywany sam ze sobą. Pierwsze ${HZ.CALIB} treningi z ćwiczeniem to kalibracja (szukanie ciężaru) – bez rekordów, a najlepszy z nich to start. Rekord liczymy na szacowanym maksie (1RM), więc więcej powtórzeń na tym samym ciężarze też jest rekordem, a dołożenie ciężaru kosztem powtórzeń nie. Punkty: ${HZ.PTS.plan} za trening z wykonanym planem, ${HZ.PTS.pr} za rekord (duże skoki zatwierdza trener), ${HZ.PTS.repPr} za rekord powtórzeń w podciąganiu/dipach + progres w % (maks. ${HZ.PTS.progressCap}).` },
 ];
 let rankSort = "points", relEx = null, rankPeriod = "month";
 const MONTH_KEYS = ["points", "strength", "workouts", "prs"];
@@ -948,6 +966,8 @@ HZ.personalStats = (logs, title, appr = {}) => {
       tile("Pkt ogólne", st.points),
       tile("Pkt siłowe", st.strength),
       tile("Tonaż", fmtVol(st.volume))),
+    st.calibrating.length ? el("div", { class:"notice small" }, el("b", { text:"🎯 Kalibracja (szukasz ciężaru): " }),
+      st.calibrating.map(x => `${x.name} ${x.n}/${HZ.CALIB}`).join(", "), `. Pierwsze ${HZ.CALIB} treningi z ćwiczeniem nie dają rekordów – najlepszy z nich to Twój punkt startu.`) : null,
     st.pending.length ? el("div", { class:"notice small" }, el("b", { text:"Czeka na zatwierdzenie trenera: " }),
       st.pending.map(x => `${x.name} ${x.to === 0 ? "bez ciężaru" : HZ.fmtKg(x.to) + " kg"} × ${x.reps} (${HZ.fmtDate(x.date)})`).join(", "), ". Po zatwierdzeniu wejdzie do rekordów i rankingu.") : null,
     recs.length ? el("div", { class:"stack", style:"gap:4px" }, el("h3", { text:"Rekordy osobiste" }),
