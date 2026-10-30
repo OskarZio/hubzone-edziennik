@@ -376,7 +376,8 @@ function onboarding(){
   const pick = (v, t, sub) => el("button", { type:"button", class:"onb-choice" + (C.onbRank === v ? " on" : ""), "aria-pressed":String(C.onbRank === v), onclick(){ C.onbRank = v; render(); } },
     el("b", { text:t }), el("span", { class:"small", text:sub }));
   const slide0 = el("section", { class:"onb-slide" },
-    el("div", { class:"onb-emoji", text:"👋" }), el("h2", { text:"Witaj w e-Dzienniku Hubzone!" }),
+    el("div", { class:"onb-hero brand" }, el("img", { class:"onb-logo", src:"assets/icons/icon-192.png", alt:"" }), el("div", { class:"onb-emoji", text:"👋" })),
+    el("h2", { text:"Witaj w e-Dzienniku Hubzone!" }),
     el("p", { class:"small", text:"Zanim zaczniesz – dwie ważne rzeczy. 20 sekund." }),
     el("div", { class:"onb-box" }, el("h3", { text:"1. Twoje dane (RODO)" }),
       el("ul", { class:"small" },
@@ -390,24 +391,66 @@ function onboarding(){
     el("div", { class:"onb-box" + (C.onbRank == null ? " need" : "") }, el("h3", { text:"2. Czy chcesz być widoczny/-a w rankingu grupy?" }),
       el("p", { class:"small muted", style:"margin:0", text:"Inni uczestnicy zobaczą Twoje imię, liczbę treningów i postępy. Zmienisz to w każdej chwili w Konto." }),
       el("div", { class:"onb-choices" }, pick(true, "✅ Tak, pokazuj mnie", "imię i wyniki widzą inni z grupy"), pick(false, "🙈 Nie, nie pokazuj", "widzisz je tylko Ty i trener"))));
-  const tip = (emoji, title, lines) => el("section", { class:"onb-slide" }, el("div", { class:"onb-emoji", text:emoji }), el("h2", { text:title }),
+  /* richer slides: coloured hero with a small mock-up of the real screen */
+  const sv = HZ.sv;
+  const shareIco = () => sv("svg", { viewBox:"0 0 24 24", width:"22", height:"22", fill:"none", stroke:"currentColor", "stroke-width":"2", "stroke-linecap":"round", "stroke-linejoin":"round", "aria-hidden":"true" },
+    sv("path", { d:"M12 3v12" }), sv("path", { d:"M8 7l4-4 4 4" }), sv("path", { d:"M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8" }));
+  const addIco = () => sv("svg", { viewBox:"0 0 24 24", width:"22", height:"22", fill:"none", stroke:"currentColor", "stroke-width":"2", "stroke-linecap":"round", "aria-hidden":"true" },
+    sv("rect", { x:"3", y:"3", width:"18", height:"18", rx:"4" }), sv("path", { d:"M12 8v8M8 12h8" }));
+  const mockRow = (n, load, reps, warm) => el("div", { class:"mk-row" + (warm ? " warm" : "") }, el("span", { class:"mk-n", text:n }), el("span", { class:"mk-f", text:load }), el("span", { class:"mk-f", text:reps }));
+  const slide = (tone, emoji, title, lines, visual) => el("section", { class:"onb-slide" },
+    el("div", { class:"onb-hero " + tone }, el("div", { class:"onb-emoji", text:emoji }), visual ? el("div", { class:"mock", "aria-hidden":"true" }, visual) : null),
+    el("h2", { text:title }),
     el("ul", { class:"onb-steps" }, lines.map(x => el("li", {}, ...x))));
+  const pf = HZ.platform(), installed = HZ.isStandalone();
+  if (!HZ.install.hooked){ HZ.install.hooked = true; HZ.install.listeners.push(render); }
+  const homeSlide = el("section", { class:"onb-slide" },
+    el("div", { class:"onb-hero install" },
+      el("div", { class:"mock phone", "aria-hidden":"true" },
+        el("div", { class:"ph-screen" }, ...["🏋️", "📷", "📅", "⚙️", "🎵", "📞", "✉️"].map(x => el("span", { class:"ph-app", text:x })),
+          el("span", { class:"ph-app hz" }, el("img", { src:"assets/icons/icon-192.png", alt:"" }))),
+        pf === "ios" ? el("div", { class:"ph-bar" }, el("span", { text:"‹" }), el("span", { text:"›" }), el("span", { class:"pulse" }, shareIco()), el("span", { text:"⧉" })) : null)),
+    el("h2", { text: installed ? "Masz już aplikację ✅" : "Dodaj Hubzone do ekranu głównego" }),
+    installed ? el("p", { text:"Aplikacja jest na Twoim ekranie głównym. Otwieraj ją stamtąd przed każdym treningiem." })
+    : el("p", { class:"onb-lead", text:"Jedno stuknięcie przed treningiem zamiast szukania linku. Zajmie 10 sekund – zrób to teraz!" }),
+    installed ? null : pf === "ios" ? el("div", { class:"onb-howto" },
+        el("div", { class:"ht-step" }, el("span", { class:"ht-n", text:"1" }), el("span", { class:"ht-ico" }, shareIco()), el("span", {}, "Stuknij ", el("b", { text:"Udostępnij" }), " na dole Safari")),
+        el("div", { class:"ht-step" }, el("span", { class:"ht-n", text:"2" }), el("span", { class:"ht-ico" }, addIco()), el("span", {}, "Wybierz ", el("b", { text:"„Do ekranu początkowego”" }), " (przewiń listę w dół)")),
+        el("div", { class:"ht-step" }, el("span", { class:"ht-n", text:"3" }), el("span", { class:"ht-ico", text:"✓" }), el("span", {}, "Stuknij ", el("b", { text:"„Dodaj”" }), " w prawym górnym rogu")),
+        el("p", { class:"small muted", style:"margin:0", text:"Działa w Safari (oraz w Chrome od iOS 16.4)." }))
+      : pf === "android" ? el("div", { class:"onb-howto" },
+        HZ.install.prompt ? el("button", { class:"primary big", async onclick(){ const pr = HZ.install.prompt; pr.prompt(); try { await pr.userChoice; } catch(e){} HZ.install.prompt = null; }, text:"📲 Zainstaluj aplikację" }) : null,
+        el("a", { class:"btn" + (HZ.install.prompt ? "" : " primary big"), href:HZ.APK_URL, rel:"noopener", text:"⬇️ Pobierz aplikację (APK)" }),
+        el("div", { class:"ht-step" }, el("span", { class:"ht-n", text:"lub" }), el("span", { class:"ht-ico", text:"⋮" }), el("span", {}, "Menu przeglądarki → ", el("b", { text:"„Zainstaluj aplikację”" }), " albo ", el("b", { text:"„Dodaj do ekranu głównego”" }))))
+      : el("div", { class:"onb-howto" }, el("p", { class:"small", style:"margin:0", text:"Otwórz e-Dziennik na telefonie – tam pokażemy, jak dodać go do ekranu głównego. Później znajdziesz to też w Konto." })));
   const slides = [slide0,
-    tip("📅", "Dzisiejszy trening", [[el("b", { text:"Po wejściu" }), " widzisz plan na dziś: boje i stacje."],
-      [el("b", { text:"Rozgrzewka W1, W2…" }), " – serie wstępne, nie liczą się do wyników."],
-      ["Wpisz ", el("b", { text:"ciężar serii roboczych" }), ", a aplikacja sama wyliczy rozgrzewkę."]]),
-    tip("🏋️", "Wpisuj serie", [["Po każdej serii wpisz ", el("b", { text:"ciężar (albo gumę) i powtórzenia" }), "."],
+    slide("blue", "📅", "Dzisiejszy trening", [[el("b", { text:"Po wejściu" }), " widzisz plan na dziś: boje i stacje."],
+      [el("b", { text:"Rozgrzewka W1, W2…" }), " nie liczy się do wyników."],
+      ["Wpisz ", el("b", { text:"ciężar serii roboczych" }), " – rozgrzewkę wyliczymy sami."]],
+      el("div", { class:"mk-card" }, el("div", { class:"mk-head" }, el("span", { text:"BÓJ 1 · Przysiad" }), el("span", { class:"mk-badge", text:"3 × 5" })),
+        el("div", { class:"mk-sec warm", text:"ROZGRZEWKA – SERIE WSTĘPNE" }), mockRow("W1", "20", "5–6", true), mockRow("W2", "35", "3–4", true),
+        el("div", { class:"mk-sec", text:"SERIE ROBOCZE – TE SIĘ LICZĄ" }), mockRow("1", "60", "5"))),
+    slide("orange", "🏋️", "Wpisuj serie", [["Po każdej serii: ", el("b", { text:"ciężar (albo guma) i powtórzenia" }), "."],
       [el("b", { text:"„bez”" }), " = bez ciężaru, np. dipy z masą ciała."],
-      ["Po ćwiczeniu kliknij ", el("b", { text:"„Zapisz bój”" }), " – nic nie zginie, trener od razu widzi wynik."]]),
-    tip("📈", "Ile dołożyć?", [[el("b", { text:"Zielona ramka" }), " podpowiada ciężar na dziś."],
-      ["Zrobisz cel we wszystkich seriach (np. 10) → ", el("b", { text:"dołóż ciężar i zejdź o 2 powtórzenia" }), ", potem co trening +1."],
-      [el("b", { text:"★ Trener zaleca" }), " – wtedy obowiązuje plan trenera."]]),
-    tip("✅", "Na koniec treningu", [["Zaznacz ", el("b", { text:"zmęczenie 1–10" }), " i napisz feedback, jeśli chcesz."],
+      ["Po ćwiczeniu kliknij ", el("b", { text:"„Zapisz bój”" }), " – trener od razu widzi wynik."]],
+      el("div", { class:"mk-card" }, mockRow("1", "60 kg", "5"), mockRow("2", "60 kg", "5"), el("div", { class:"mk-row" }, el("span", { class:"mk-n", text:"3" }), el("span", { class:"mk-f nokg", text:"bez ciężaru" }), el("span", { class:"mk-f", text:"8" })),
+        el("div", { class:"mk-save" }, el("span", { class:"mk-ok", text:"✓ Zapisane" }), el("span", { class:"mk-btn", text:"Zapisz bój" })))),
+    slide("green", "📈", "Ile dołożyć?", [[el("b", { text:"Zielona ramka" }), " podpowiada ciężar na dziś."],
+      ["Cel we wszystkich seriach (np. 10)? ", el("b", { text:"Dołóż i zejdź o 2 powt." }), ", potem co trening +1."],
+      [el("b", { text:"★ Trener zaleca" }), " – wtedy obowiązuje plan trenera."]],
+      el("div", { class:"stack", style:"gap:8px" },
+        el("div", { class:"mk-tip up" }, el("b", { text:"↑ Dołóż 2,5 kg → 62,5 kg" }), el("span", { text:"Cel 5 powt. zrobiony – dziś 3 powt." })),
+        el("div", { class:"mk-tip plan" }, el("b", { text:"★ Trener zaleca: 62,5 kg × 5" })))),
+    slide("purple", "✅", "Na koniec treningu", [["Zaznacz ", el("b", { text:"zmęczenie 1–10" }), " i dopisz feedback."],
       ["Kliknij ", el("b", { text:"„Wyślij wyniki do trenera”" }), "."],
-      ["Zapomnisz wysłać? Trener i tak zobaczy Twoją ", el("b", { text:"wersję roboczą" }), "."]]),
-    tip("🏆", "Postępy i ranking", [[el("b", { text:"Postępy" }), " – wykresy, rekordy i ile więcej podnosisz od startu."],
-      [el("b", { text:"Ranking" }), " – punkty za regularność i postęp, miesięczny (co miesiąc od nowa) i ogólny (cały czas). " + ((C.profile.consent && C.profile.consent.ranking) || C.onbRank ? "Jesteś w rankingu." : "Nie jesteś w rankingu – zmienisz to w Konto.")],
-      [el("b", { text:"Konto" }), " – zgody, motyw, Twoje dane i ta instrukcja. Dodaj aplikację do ekranu głównego!"]])];
+      ["Zapomnisz? Trener i tak widzi Twoją ", el("b", { text:"wersję roboczą" }), "."]],
+      el("div", { class:"mk-card" }, el("div", { class:"mk-fat" }, [1,2,3,4,5,6,7,8,9,10].map(n => el("span", { class: n === 7 ? "on" : "", text:String(n) }))),
+        el("div", { class:"mk-btn wide", text:"Wyślij wyniki do trenera" }))),
+    homeSlide,
+    slide("gold", "🏆", "Postępy i ranking", [[el("b", { text:"Postępy" }), " – wykresy, rekordy i ile więcej podnosisz od startu."],
+      [el("b", { text:"Ranking" }), " – miesięczny i ogólny. " + ((C.profile.consent && C.profile.consent.ranking) || C.onbRank ? "Jesteś w rankingu." : "Nie jesteś w rankingu – zmienisz to w Konto.")],
+      [el("b", { text:"Konto" }), " – zgody, motyw, Twoje dane i ta instrukcja."]],
+      el("div", { class:"mk-podium" }, el("div", { class:"p2" }, HZ.medal(2)), el("div", { class:"p1" }, HZ.medal(1)), el("div", { class:"p3" }, HZ.medal(3))))];
   const shown = consentDone ? slides : [slide0];
   let idx = Math.min(C.onb, shown.length - 1);
   const dots = el("div", { class:"onb-dots" }, slides.map((_, i) => el("span", { class: i === idx ? "on" : (i < idx ? "done" : "") })));

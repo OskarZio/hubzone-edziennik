@@ -291,3 +291,62 @@ a.btn.primary{ background:var(--accent); color:var(--accent-ink); border-color:v
 .onb-bottom{ display:flex; flex-direction:column; gap:12px; padding:12px 20px 16px; border-top:1px solid var(--line); background:var(--surface); }
 .onb-bottom .onb-next{ width:100%; padding:14px; font-size:1.05rem; }
 .onb-full .onb-dots span{ transition:background .2s, width .2s; } .onb-full .onb-dots span.on{ width:40px; }
+
+/* ---------- tutorial v2: hero + mock-ups ---------- */
+.onb-hero{ border-radius:20px; padding:18px; display:flex; flex-direction:column; align-items:center; gap:12px; color:#fff; position:relative; overflow:hidden; min-height:150px; justify-content:center; }
+.onb-hero .onb-emoji{ margin:0; font-size:2.6rem; filter:drop-shadow(0 4px 8px rgba(0,0,0,.25)); }
+.onb-hero.brand{ background:linear-gradient(135deg,#14202A,#2b3d4d 60%, var(--accent)); flex-direction:row; justify-content:center; gap:16px; }
+.onb-hero.blue{ background:linear-gradient(135deg,#1c64c8,#5ca3ff); }
+.onb-hero.orange{ background:linear-gradient(135deg,#d9480f,#ff8c42); }
+.onb-hero.green{ background:linear-gradient(135deg,#2f8a2f,#6acb5f); }
+.onb-hero.purple{ background:linear-gradient(135deg,#7340c9,#b08cff); }
+.onb-hero.gold{ background:linear-gradient(135deg,#a86a00,#f2c94c); }
+.onb-hero.install{ background:linear-gradient(135deg,#14202A,var(--accent)); }
+.onb-logo{ width:72px; height:72px; border-radius:18px; box-shadow:0 6px 18px rgba(0,0,0,.35); background:#fff; }
+.onb-slide h2{ font-size:1.55rem; }
+.onb-lead{ font-size:1.05rem; font-weight:600; margin:0; }
+/* mock-ups (pictures of the real screen, not clickable) */
+.mock{ width:100%; max-width:320px; pointer-events:none; color:#14202A; }
+.mk-card{ background:#fff; border-radius:14px; padding:10px; display:grid; gap:6px; box-shadow:0 10px 24px rgba(0,0,0,.22); font-size:.85rem; }
+.mk-head{ display:flex; justify-content:space-between; align-items:center; font-weight:700; }
+.mk-badge{ background:#14202A; color:#fff; border-radius:999px; padding:2px 8px; font-size:.75rem; }
+.mk-sec{ font-size:.62rem; font-weight:800; letter-spacing:.06em; color:#5a6873; } .mk-sec.warm{ color:#3d63c9; }
+.mk-row{ display:grid; grid-template-columns:28px 1fr 1fr; gap:6px; align-items:center; }
+.mk-row.warm .mk-f{ border-style:dashed; } .mk-row.warm .mk-n{ color:#3d63c9; }
+.mk-n{ font-weight:800; text-align:center; }
+.mk-f{ border:1px solid #d3dadf; border-radius:8px; padding:6px; text-align:center; font-weight:600; background:#fff; }
+.mk-f.nokg{ background:#fbe3d6; color:#d9480f; border:1px dashed #d9480f; font-size:.75rem; }
+.mk-save{ display:flex; justify-content:space-between; align-items:center; margin-top:4px; }
+.mk-ok{ color:#2f8a2f; font-weight:700; font-size:.8rem; }
+.mk-btn{ background:#d9480f; color:#fff; border-radius:8px; padding:7px 12px; font-weight:700; font-size:.8rem; text-align:center; } .mk-btn.wide{ display:block; }
+.mk-tip{ background:#fff; border-radius:12px; padding:10px 12px; display:grid; gap:2px; box-shadow:0 10px 24px rgba(0,0,0,.2); font-size:.85rem; }
+.mk-tip.up{ border-left:5px solid #2f8a2f; } .mk-tip.up b{ color:#2f8a2f; }
+.mk-tip.plan{ border-left:5px solid #d9480f; } .mk-tip.plan b{ color:#d9480f; }
+.mk-fat{ display:grid; grid-template-columns:repeat(10,1fr); gap:3px; }
+.mk-fat span{ border:1px solid #d3dadf; border-radius:6px; text-align:center; padding:5px 0; font-weight:700; font-size:.75rem; }
+.mk-fat span.on{ background:#14202A; color:#fff; border-color:#14202A; }
+.mk-podium{ display:flex; align-items:flex-end; justify-content:center; gap:10px; }
+.mk-podium > div{ background:rgba(255,255,255,.9); border-radius:12px 12px 0 0; width:74px; display:flex; justify-content:center; padding-top:10px; }
+.mk-podium .p1{ height:96px; } .mk-podium .p2{ height:72px; } .mk-podium .p3{ height:56px; }
+/* phone picture for "add to home screen" */
+.mock.phone{ max-width:200px; background:#0e151b; border-radius:26px; padding:10px; box-shadow:0 12px 30px rgba(0,0,0,.4); }
+.ph-screen{ background:linear-gradient(160deg,#3a5f8a,#7a4fb0); border-radius:18px; padding:14px 10px; display:grid; grid-template-columns:repeat(4,1fr); gap:10px; justify-items:center; }
+.ph-app{ width:34px; height:34px; border-radius:9px; background:rgba(255,255,255,.85); display:grid; place-items:center; font-size:1.05rem; }
+.ph-app.hz{ background:#fff; box-shadow:0 0 0 3px #fff, 0 0 0 6px var(--accent); animation:hz-pop 1.8s ease-in-out infinite; }
+.ph-app.hz img{ width:30px; height:30px; border-radius:7px; }
+.ph-bar{ display:flex; justify-content:space-around; align-items:center; color:#4da3ff; padding:8px 4px 2px; font-size:1.2rem; }
+.ph-bar .pulse{ display:grid; place-items:center; border-radius:50%; width:34px; height:34px; box-shadow:0 0 0 0 rgba(77,163,255,.7); animation:hz-ring 1.6s ease-out infinite; }
+@keyframes hz-pop{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.12); } }
+@keyframes hz-ring{ 0%{ box-shadow:0 0 0 0 rgba(77,163,255,.7); } 100%{ box-shadow:0 0 0 14px rgba(77,163,255,0); } }
+@media (prefers-reduced-motion: reduce){ .ph-app.hz, .ph-bar .pulse{ animation:none; } }
+/* how-to steps */
+.onb-howto{ display:grid; gap:10px; border:2px solid var(--accent); border-radius:16px; padding:14px; background:var(--accent-soft); }
+.ht-step{ display:grid; grid-template-columns:auto auto 1fr; gap:10px; align-items:center; font-size:1rem; }
+.ht-n{ min-width:28px; height:28px; padding:0 6px; border-radius:999px; background:var(--accent); color:var(--accent-ink); display:grid; place-items:center; font-weight:800; font-size:.85rem; }
+.ht-ico{ width:40px; height:40px; border-radius:10px; background:var(--surface); border:1px solid var(--line); display:grid; place-items:center; color:#1c7cf0; font-size:1.2rem; font-weight:800; }
+.onb-howto .big, .onb-howto a.big{ padding:14px; font-size:1.05rem; width:100%; }
+.onb-slide .onb-steps li::marker{ color:var(--accent); font-weight:800; }
+.mock.phone{ max-width:178px; padding:8px; border-radius:22px; }
+.ph-screen{ gap:8px; padding:12px 8px; }
+.ph-app{ width:30px; height:30px; border-radius:8px; font-size:.95rem; }
+.ph-app.hz img{ width:26px; height:26px; }
