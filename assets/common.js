@@ -811,7 +811,7 @@ const RANK_COLS = [
 ];
 const BOARDS = [
   { key:"points", label:"Regularność", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
-  { key:"rel", label:"Siła", desc:"Siła względna: największy ciężar roboczy jako % masy ciała, więc 100 kg przy 100 kg wagi to 100%, a 80 kg przy 60 kg to 133%. Domyślnie średnia z bojów głównych. Przy podciąganiu i dipach liczy się masa ciała + dociążenie. Samej masy ciała nikt nie widzi." },
+  { key:"rel", label:"Siła", desc:"Punkty siły = podniesiony ciężar × współczynnik masy ciała i płci (IPF GL, jak w trójboju) × mnożnik wieku. Przy podciąganiu i dipach liczy się masa ciała + dociążenie (na gumie: minus pomoc gumy). Dzięki temu lżejsi, cięższi, kobiety, mężczyźni i starsi rywalizują na równych zasadach. „Razem” to suma z bojów głównych, więc wygrywa najbardziej wszechstronny. Wagę, wiek i płeć widzi tylko zawodnik i trener." },
   { key:"strength", label:"Postęp", desc:`Każdy porównywany sam ze sobą: ${HZ.PTS.plan} pkt za trening z wykonanym planem, ${HZ.PTS.repPr} pkt za rekord powtórzeń, ${HZ.PTS.pr} pkt za rekord ciężaru (tylko wiarygodny skok albo zatwierdzony przez trenera) + progres w % (maks. ${HZ.PTS.progressCap}).` }
 ];
 let rankSort = "points", relEx = null, rankPeriod = "month";
@@ -849,7 +849,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   // main lifts = exercises the trainer puts in the "Trening główny" section
   const mainIds = new Set(S.workouts.flatMap(w => (w.stations || []).filter(st => HZ.secOf(st) === "main").map(st => st.exId)));
   const relAvg = r => { const v = Object.entries(r.rel || {}).filter(([id]) => mainIds.has(id)).map(([, p]) => p); return v.length ? Math.round(v.reduce((a,b) => a + b, 0) / v.length) : null; };
-  if (relEx !== "main" && !relIds.includes(relEx)) relEx = mainIds.size ? "main" : (relIds[0] || null);
+  if (relEx !== "main" && !relIds.includes(relEx) && !mainIds.has(relEx)) relEx = mainIds.size ? "main" : (relIds[0] || null);
   const relOf = r => relEx === "main" ? relAvg(r) : (r.rel && r.rel[relEx] != null ? r.rel[relEx] : null);
   const kgOf = r => { const b = r.bests || {};
     if (relEx === "main"){ const v = [...mainIds].map(id => b[id]).filter(x => x > 0); return v.length ? Math.round(v.reduce((a,c) => a + c, 0) * 100) / 100 : null; }
@@ -861,11 +861,11 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const kgCol = ["kg", relEx === "main" ? "Suma kg" : "Ciężar", r => kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : "–"];
   const strengthView = rankSort === "rel" || rankSort === "kg" || rankSort === "adj";
   const adjOf = r => r.sc ? (relEx === "main" ? r.sc.main : r.sc[relEx]) ?? null : null;
-  const adjCol = ["adj", "Z mnożn.", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" + ((r.af || 1) > 1 ? ` (wiek ×${String(r.af).replace(".", ",")})` : "") : "–"];
+  const adjCol = ["adj", "Punkty siły", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" : "–"];
   const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
   const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (r.m[k] || 0) : 0) : r[k];
   const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l]) => [k, l, r => field(r, k) ?? 0]) : RANK_COLS;
-  const cols = strengthView ? [relCol, adjCol, kgCol, ...RANK_COLS] : baseCols;
+  const cols = strengthView ? [adjCol, relCol, kgCol] : baseCols;
   const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "adj" ? (adjOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (field(r, rankSort) == null ? -Infinity : field(r, rankSort));
   const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((field(b, "points")||0) - (field(a, "points")||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
@@ -879,19 +879,19 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
       el("span", { class:"pv2", text: rankSort === "kg" && relOf(r) != null ? relTxt(relOf(r)) : rankSort === "rel" && kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : rankSort === "adj" && relOf(r) != null ? relTxt(relOf(r)) : "\u00a0" })))))
     : el("p", { class:"small muted", text: rankSort === "rel" ? "Nikt jeszcze nie ma wyniku w tym ćwiczeniu z wpisaną masą ciała." : "Brak wyników." });
   const me = placed.find(x => x.r.id === meId);
-  const exSel = strengthView && relIds.length ? el("select", { id:"rel-ex", "aria-label":"Ćwiczenie", onchange(e){ relEx = e.target.value; rerender(); } },
-    mainIds.size ? el("option", { value:"main", text:"Boje główne (średnia)" }) : null, relIds.map(id => el("option", { value:id, text:HZ.exById(id).name }))) : null;
-  if (exSel) exSel.value = relEx;
+  // one strength ranking with tabs: Razem + each main lift (e.g. Przysiad, Podciąganie, Dip)
+  const tabIds = mainIds.size ? [...mainIds].filter(id => HZ.exById(id)) : relIds;
+  const exSel = strengthView && (tabIds.length || mainIds.size) ? el("div", { class:"modes ex-tabs", role:"group", "aria-label":"Ćwiczenie" },
+    [...(mainIds.size ? [["main", "Razem"]] : []), ...tabIds.map(id => [id, HZ.exById(id).name])].map(([id, t]) => el("button", { type:"button", "data-ex":id, "aria-pressed":String(relEx === id),
+      onclick(){ relEx = id; rerender(); }, text:t }))) : null;
   return [opts.message ? HZ.motivationBox(opts.message) : null, el("div", { class:"card" },
       strengthView ? null : el("div", { class:"modes", role:"group", "aria-label":"Okres" },
         [["month", "📅 Miesięczny"], ["all", "♾️ Ogólny"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankPeriod === k), onclick(){ rankPeriod = k; rerender(); }, text:t }))),
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
-        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && (rankSort === "kg" || rankSort === "adj"))), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
-      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "adj" ? " Z mnożnikiem: punkty IPF GL (jak w trójboju – uwzględniają masę ciała i płeć, więc kobiety i mężczyźni o różnej wadze rywalizują uczciwie) × mnożnik wieku (do 35 lat ×1, 36–50 lat +1% za rok, powyżej 50 +1,5% za rok). Wymaga wpisanej wagi i płci. Wagę, wiek i płeć widzi tylko zawodnik i trener." : "") + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
+        BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && (rankSort === "kg" || rankSort === "adj"))), onclick(){ rankSort = b.key === "rel" ? "adj" : b.key; rerender(); }, text:b.label }))),
+      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
       opts.relPrompt && strengthView ? opts.relPrompt : null,
-      strengthView ? el("div", { class:"modes", role:"group", "aria-label":"Sortuj według" },
-        [["rel","% masy ciała"],["adj","Z mnożnikiem"],["kg","Ciężar (kg)"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankSort === k), onclick(){ rankSort = k; rerender(); }, text:t }))) : null,
-      strengthView && relEx === "main" ? el("p", { class:"small muted", text:"Liczą się boje, które trener daje w treningu głównym: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(", ") + "." }) : null,
+      strengthView && relEx === "main" ? el("p", { class:"small muted", text:"Razem = suma punktów z: " + [...mainIds].map(id => (HZ.exById(id) || {}).name).filter(Boolean).join(" + ") + ". Kto nie robił któregoś boju, dostaje za niego 0." }) : null,
       exSel, podium,
       me && me.place !== "–" ? el("p", { class:"small", text:`Twoje miejsce: ${me.place} z ${placed.filter(x => x.place !== "–").length}` }) : null),
     el("div", { class:"card" }, el("h3", { text: strengthView ? "Tabela" : monthMode ? `Tabela – ${HZ.monthName(mk)}` : "Tabela – cały czas" }),
@@ -901,7 +901,8 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
         el("tbody", {}, placed.map(({ r, place }) => el("tr", { class: r.id === meId ? "me" : null },
           el("td", {}, typeof place === "number" && place <= 3 ? HZ.medal(place, true) : String(place)), el("td", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }),
           cols.map(([k,, f]) => el("td", { class: k === rankSort ? "on" : null, text:f(r) }))))))),
-      el("p", { class:"small muted", text:"Seria: piątki z rzędu. Rekord: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i sposobie wykonania. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: ciężar × powtórzenia w seriach roboczych. % MC: ciężar jako procent masy ciała. Ciężar / Suma kg: największy ciężar roboczy (suma z bojów głównych)." }))];
+      strengthView ? el("p", { class:"small muted", text:"Punkty siły: ciężar × współczynnik masy ciała i płci (IPF GL) × wiek – wymagają wpisanej wagi i płci (Konto). % MC: ciężar jako procent masy ciała; przy podciąganiu i dipach „MC +X%” = masa ciała + X% dociążenia. Ciężar: najlepszy ciężar roboczy (Razem: suma). Kliknij nagłówek kolumny, żeby zmienić sortowanie." }) :
+el("p", { class:"small muted", text:"Seria: piątki z rzędu. Rekord: wynik lepszy od wszystkich poprzednich w danym ćwiczeniu i sposobie wykonania. Progres: średni wzrost największego ciężaru od pierwszego treningu. Tonaż: ciężar × powtórzenia w seriach roboczych. % MC: ciężar jako procent masy ciała. Ciężar / Suma kg: największy ciężar roboczy (suma z bojów głównych)." }))];
 };
 
 /* individual stats card (client: Postępy; trainer: client history) */

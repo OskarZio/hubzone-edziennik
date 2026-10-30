@@ -361,3 +361,5 @@ a.btn.primary{ background:var(--accent); color:var(--accent-ink); border-color:v
 .pod .pv{ display:flex; flex-direction:column; line-height:1.25; }
 .pod .pv > span{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
 .pod .pv2{ font-size:.8rem; opacity:.85; }
+.ex-tabs{ flex-wrap:wrap; }
+.ex-tabs button{ flex:1 1 auto; }
