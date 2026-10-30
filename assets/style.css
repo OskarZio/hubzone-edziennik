@@ -363,3 +363,19 @@ a.btn.primary{ background:var(--accent); color:var(--accent-ink); border-color:v
 .pod .pv2{ font-size:.8rem; opacity:.85; }
 .ex-tabs{ flex-wrap:wrap; }
 .ex-tabs button{ flex:1 1 auto; }
+
+/* warm-up calculator + guide */
+.target.calc{ border:2px solid #3d63c9; background:rgba(61,99,201,.07); border-radius:12px; padding:10px 12px; display:grid; gap:8px; }
+.calc-steps{ margin:0; padding-left:1.2em; display:grid; gap:2px; }
+.calc-plan{ display:grid; gap:2px; background:var(--surface); border:1px dashed #3d63c9; border-radius:8px; padding:8px 10px; }
+.calc-plan b{ color:#3d63c9; font-variant-numeric:tabular-nums; }
+[data-theme="dark"] .calc-plan b, [data-theme="dark"] .target.calc .link{ color:#8fb0ff; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .calc-plan b{ color:#8fb0ff; } }
+.wg-btn{ padding:3px 10px; font-size:.75rem; border-radius:999px; border:1px solid #3d63c9; color:#3d63c9; background:transparent; text-transform:none; letter-spacing:0; font-weight:700; }
+.wg-full{ position:fixed; inset:0; z-index:70; background:rgba(10,15,20,.55); display:flex; align-items:flex-end; justify-content:center; padding:12px; }
+.wg-card{ background:var(--surface); color:var(--ink); border-radius:18px; padding:16px; width:100%; max-width:560px; max-height:88vh; overflow-y:auto; display:grid; gap:10px; }
+.wg-card h2{ margin:0; font-size:1.3rem; } .wg-card h3{ margin:4px 0 0; font-size:1rem; } .wg-card p{ margin:0; } .wg-card ol, .wg-card ul{ margin:0; padding-left:1.2em; display:grid; gap:4px; }
+.wg-rows{ display:grid; gap:4px; }
+.wg-row{ display:grid; grid-template-columns:36px 1fr auto; gap:8px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:.9rem; }
+.wg-row.warm{ border-style:dashed; } .wg-row.warm .mk-n{ color:#3d63c9; }
+@media (min-width:640px){ .wg-full{ align-items:center; } }

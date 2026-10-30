@@ -438,7 +438,7 @@ function entryView(){
           el("div", { class:"row", style:"gap:4px" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }), tRir != null ? el("span", { class:"badge rir", text:`RIR ${tRir}` }) : null)),
         HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = entrySets(w, st, exBase, m, logs); render(); }, exBase),
         HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); render(); }, (sets.find(s => !s.warmup) || {}).load),
-        isMain && mode === "kg" && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, render, `en-${st.id}`) : null,
+        isMain && (mode === "kg" || mode === "band") && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, render, `en-${st.id}`) : null,
         HZ.setsEditor(ex, sets, `en-${st.id}`, structural => { if (structural) render(); }, { repsHint:sg.reps, noWarmup:!isMain, noRir:(S.config.features || {}).rir === "off" })));
     }
   }

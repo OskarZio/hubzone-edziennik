@@ -253,7 +253,7 @@ function stationCard(w, st, exBase, label, d, isSuper){
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
     HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }, exBase),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),
-    isMain && mode === "kg" && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, () => { saveDrafts(); render(); }, `w${w.id}-${st.id}`) : null,
+    isMain && (mode === "kg" || mode === "band") && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, () => { saveDrafts(); render(); }, `w${w.id}-${st.id}`) : null,
     HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); else updateState(); }, { repsHint:sg.reps, noWarmup:!isMain, noRir:!rirOn() }),
     (() => { const stt = stationState(w, st, d); const name = label.split(" · ")[0];
       return el("div", { class:"stsave" }, el("span", { class:"state " + stt.kind, "data-state":st.id, text:stt.text }),

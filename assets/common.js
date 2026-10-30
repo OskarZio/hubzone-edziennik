@@ -517,7 +517,8 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     el("button", { type:"button", class:"ghost", onclick(){ const last = sets.filter(s => !s.warmup).pop(); sets.push({ load: last ? last.load : null, reps:null, rir:null }); onChange(true); }, text:"+ seria" }),
     nWork > 1 ? el("button", { type:"button", class:"ghost", onclick(){ sets.pop(); onChange(true); }, text:"− seria" }) : null);
   const body = []; rows.forEach((r, i) => {
-    if (nWarm && i === 0) body.push(el("div", { class:"setsec warm", text:"Rozgrzewka – serie wstępne (W1, W2…)" }));
+    if (nWarm && i === 0) body.push(el("div", { class:"setsec warm row between", style:"flex-wrap:nowrap" }, el("span", { text:"Rozgrzewka – serie wstępne (W1, W2…)" }),
+      el("button", { type:"button", class:"wg-btn", onclick(){ HZ.warmGuide(); }, text:"ℹ️ Instrukcja" })));
     if (nWarm && i === nWarm) body.push(el("div", { class:"setsec", text:"Serie robocze – te się liczą" }));
     body.push(r); });
   return el("div", { class:"sets" + (opts.noRir ? " norir" : "") }, head, body, ctl);
@@ -548,18 +549,64 @@ HZ.modeToggle = (cur, onPick, exBase) => { const ok = exBase ? HZ.modesOf(exBase
   return el("div", { class:"modes", role:"group", "aria-label":"Sposób wykonania" },
   ok.map(m => el("button", { type:"button", "aria-pressed":String(cur === m), onclick(){ if (cur !== m) onPick(m); }, text:HZ.MODE_LABEL[m] }))); };
 /* "target weight" for the working sets: warm-ups are calculated from it (W2 ≈60%, W3 ≈80%; W1 set by the trainer) */
+/* warm-up calculator: enter the working weight (or pick the working band) → W1, W2, W3 are filled in */
+HZ.loadName = (ex, v) => v === HZ.SCAP ? (ex.warmLabel || "aktywacja") : typeof v === "string" ? (v === "none" ? "bez gumy" : HZ.bandName(v)) : v === 0 ? "bez ciężaru" : v == null || v === "" ? "?" : HZ.fmtKg(v) + " kg";
 HZ.targetBox = (ex, sets, onSet, idp) => {
-  const work = sets.find(s => !s.warmup); const cur = work && typeof work.load === "number" ? work.load : null;
-  const inp = el("input", { id:idp + "-target", inputmode:"decimal", placeholder:"np. 80", value: cur != null ? HZ.fmtKg(cur) : "", style:"max-width:6.5rem;text-align:center" });
-  const go = () => { const v = HZ.parseNum(inp.value); if (v == null || v < 0 || v > 500){ HZ.toast("Wpisz ciężar serii roboczych w kg, np. 80."); return; }
-    const before = JSON.stringify(sets);
-    for (const s of sets){ if (!s.warmup) s.load = v; else if (s.reps == null) s.manual = false; }
+  const band = ex.type === "band";
+  const work = sets.find(s => !s.warmup), warm = sets.filter(s => s.warmup);
+  const cur = work ? (band ? (work.load || null) : (typeof work.load === "number" ? work.load : null)) : null;
+  const apply = v => { const before = JSON.stringify(sets);
+    for (const x of sets){ if (!x.warmup) x.load = v; else if (x.reps == null) x.manual = false; }
     HZ.refreshWarmups(ex, sets); if (JSON.stringify(sets) !== before) setTimeout(onSet, 0); };
-  inp.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); go(); } });
-  inp.addEventListener("change", go);
-  return el("div", { class:"target" }, el("label", { class:"f", for:idp + "-target", text:"Ciężar serii roboczych (kg)" }),
-    el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px" }, inp, el("button", { type:"button", class: cur == null ? "primary" : "", onclick: go, text:"Oblicz serie wstępne" })),
-    el("span", { class:"small muted", text: cur == null ? "Nie wiesz, ile na rozgrzewkę? Wpisz ciężar, którym robisz serie, a wyliczymy W2 ≈60% i W3 ≈80%." : "W2 ≈60%, W3 ≈80% ciężaru roboczego, zaokrąglone do talerzy." })); };
+  let field, go;
+  if (band){
+    field = HZ.loadInput(ex, cur, v => { if (v) apply(v); }, idp + "-target");
+    go = () => { const v = document.getElementById(idp + "-target").value; if (!v){ HZ.toast("Wybierz gumę, na której robisz serie robocze."); return; } apply(v); };
+  } else {
+    const inp = el("input", { id:idp + "-target", inputmode:"decimal", placeholder:"np. 80", value: cur != null ? HZ.fmtKg(cur) : "", style:"max-width:6.5rem;text-align:center" });
+    go = () => { const v = HZ.parseNum(inp.value); if (v == null || v < 0 || v > 500){ HZ.toast("Wpisz ciężar serii roboczych w kg, np. 80."); return; } apply(v); };
+    inp.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); go(); } });
+    inp.addEventListener("change", go);
+    field = inp;
+  }
+  const plan = cur != null && warm.length ? [...warm.map((x, i) => `W${i + 1} ${HZ.loadName(ex, x.load)}`), `robocze ${HZ.loadName(ex, cur)}`].join(" → ") : null;
+  return el("div", { class:"target calc" },
+    el("div", { class:"row between", style:"flex-wrap:nowrap" }, el("b", { text:"🧮 Oblicz rozgrzewkę" }), el("button", { type:"button", class:"link small", onclick(){ HZ.warmGuide(); }, text:"ℹ️ Jak to działa?" })),
+    el("ol", { class:"calc-steps small" },
+      band ? el("li", {}, "Wybierz ", el("b", { text:"gumę serii roboczych" }), ".") : el("li", {}, "Wpisz ", el("b", { text:"ciężar serii roboczych (kg)" }), "."),
+      el("li", {}, "Kliknij ", el("b", { text: band ? "„Rozpisz rozgrzewkę”" : "„Oblicz serie wstępne”" }), " – W1, W2… wypełnią się same.")),
+    el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px" }, el("div", { style: band ? "flex:1;min-width:0" : "" }, field),
+      el("button", { type:"button", class: cur == null ? "primary" : "", onclick: go, text: band ? "Rozpisz rozgrzewkę" : "Oblicz serie wstępne" })),
+    plan ? el("div", { class:"calc-plan" }, el("span", { class:"small muted", text:"Twoja rozgrzewka:" }), el("b", { text:plan })) : null,
+    el("span", { class:"small muted", text: band ? "Zaczynasz od mocniejszej gumy (więcej pomocy) i schodzisz do gumy roboczej." : "W2 ≈60%, W3 ≈80% ciężaru roboczego, zaokrąglone do talerzy." }));
+};
+/* dedicated guide for warm-up sets (opens over the page) */
+HZ.warmGuide = () => {
+  if (document.querySelector(".wg-full")) return;
+  const close = () => box.remove();
+  const ex = (t, rows) => el("div", { class:"wg-ex" }, el("b", { text:t }), el("div", { class:"wg-rows" }, rows.map(([n, l, r]) => el("div", { class:"wg-row" + (n.startsWith("W") ? " warm" : "") }, el("span", { class:"mk-n", text:n }), el("span", { text:l }), el("span", { class:"muted", text:r })))));
+  const box = el("div", { class:"wg-full", role:"dialog", "aria-modal":"true", "aria-label":"Instrukcja: serie wstępne", onclick(e){ if (e.target === box) close(); } },
+    el("div", { class:"wg-card" },
+      el("div", { class:"row between", style:"flex-wrap:nowrap" }, el("h2", { text:"🔥 Serie wstępne – instrukcja" }), el("button", { class:"ghost", "aria-label":"Zamknij", onclick: close, text:"✕" })),
+      el("p", { text:"Serie wstępne (W1, W2, W3) to rozgrzewka przed seriami roboczymi. Przygotowują stawy i technikę. Nie liczą się do wyników, rekordów ani rankingu." }),
+      el("h3", { text:"Jak policzyć – 2 kroki" }),
+      el("ol", {}, el("li", {}, "W ramce ", el("b", { text:"🧮 Oblicz rozgrzewkę" }), " wpisz ciężar serii roboczych albo wybierz gumę roboczą."),
+        el("li", {}, "Kliknij ", el("b", { text:"„Oblicz”" }), " – aplikacja wpisze W1, W2, W3. Potem tylko wpisujesz zrobione powtórzenia.")),
+      el("h3", { text:"Ciężar – przykład: serie robocze 80 kg" }),
+      ex("", [["W1", "20 kg (gryf) lub to, co ustawił trener", "5–6 powt."], ["W2", "47,5 kg (≈60%)", "3–4 powt."], ["W3", "65 kg (≈80%)", "1–2 powt."], ["1–3", "80 kg – serie robocze", "cel"]]),
+      el("h3", { text:"Guma – przykład: serie robocze na zielonej" }),
+      ex("", [["W1", "aktywacja łopatek / najmocniejsza guma", "6–8 powt."], ["W2", "mocniejsza guma (więcej pomocy)", "3–4 powt."], ["W3", "guma pośrednia", "1–2 powt."], ["1–3", "zielona – serie robocze", "cel"]]),
+      el("p", { class:"small" }, "Im ", el("b", { text:"mocniejsza guma" }), ", tym łatwiej – dlatego rozgrzewka idzie od mocnej gumy do gumy roboczej."),
+      el("h3", { text:"Podciąganie / dipy z ciężarem" }),
+      el("p", { class:"small", text:"Rozgrzewka może być mieszana: guma → bez ciężaru → ok. 50% dociążenia. Przy każdej serii wstępnej przycisk „guma / kg” przełącza sposób." }),
+      el("h3", { text:"Ważne" }),
+      el("ul", { class:"small" }, el("li", { text:"Rozgrzewka ma być lekka – nie męcz się przed seriami roboczymi." }),
+        el("li", { text:"Możesz zmienić ciężar w serii wstępnej ręcznie albo usunąć ją przyciskiem „− wstępna”." }),
+        el("li", { text:"Nie wiesz, od czego zacząć? Zapytaj trenera." })),
+      el("button", { class:"primary", style:"width:100%", onclick: close, text:"Rozumiem" })));
+  document.body.append(box);
+  const k = e => { if (e.key === "Escape"){ close(); document.removeEventListener("keydown", k); } }; document.addEventListener("keydown", k);
+};
 /* working sets reset to a new load (warm-ups without reps follow for kg) */
 HZ.applyLoad = (ex, sets, load) => {
   for (const s of sets) if (!s.warmup) s.load = load;
