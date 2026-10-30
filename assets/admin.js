@@ -73,7 +73,7 @@ function body(){
         for (const c of A.clients.filter(c => consent.has(c.id))){
           const logs = (A.allLogs || []).filter(l => l.user_id === c.id); if (!logs.length) continue;
           const old = byId.get(c.id) || {};
-          const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear), hidden: old.hidden === true };
+          const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear, c.sex), hidden: old.hidden === true };
           const { updatedAt, id, ...prev } = old;
           if (JSON.stringify(prev) === JSON.stringify(row)) continue;
           const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() });
@@ -330,7 +330,8 @@ async function loadResults(wid){
   A.res = { wid, rows:null, loading:true }; render();
   const { data, error } = await HZ.api.logsForWorkout(wid);
   if (error){ toast(HZ.dbError(error)); A.res = { wid, rows:[], loading:false }; render(); return; }
-  const [dr, tq] = await Promise.all([HZ.api.draftsForWorkout(wid), HZ.api.techniqueFor(wid)]);
+  const [dr, tq, at] = await Promise.all([HZ.api.draftsForWorkout(wid), HZ.api.techniqueFor(wid), HZ.api.getAbsent(wid)]);
+  A.res.absent = new Set((at && at.data) || []);
   A.res.drafts = new Map(((dr && dr.data) || []).map(x => [x.user_id, x])); A.res.tech = Object.fromEntries(((tq && tq.data) || []).map(x => [x.id, x.items || {}]));
   const byUser = new Map(data.map(l => [l.user_id, l]));
   const rows = A.clients.map(c => ({ client:c, log:byUser.get(c.id) || null }));
@@ -345,22 +346,32 @@ function resultsView(){
   const pick = el("select", { id:"res-w", "aria-label":"Trening", onchange(e){ loadResults(e.target.value); } },
     [...ws].reverse().map(w => el("option", { value:w.id, text:`${HZ.workoutLabel(w)}` })));
   pick.value = wid;
-  const rows = A.res.wid === wid ? A.res.rows : null; const done = rows ? rows.filter(r => r.log) : [];
+  const rows0 = A.res.wid === wid ? A.res.rows : null, absent = A.res.absent || new Set();
+  const isAbs = r => absent.has(r.client.id) && !r.log;   // someone marked absent but with results still counts as present
+  const rows = rows0 ? [...rows0.filter(r => !isAbs(r)), ...rows0.filter(isAbs)] : null; const done = rows ? rows.filter(r => r.log) : [];
+  const expected = A.clients.filter(c => !(absent.has(c.id) && !(rows0 || []).some(r => r.client.id === c.id && r.log))).length;
   const avg = (() => { const f = done.map(r => r.log.fatigue).filter(v => v != null); return f.length ? (f.reduce((a,b) => a+b, 0) / f.length).toLocaleString("pl-PL", { maximumFractionDigits:1 }) : "–"; })();
   const out = [el("div", { class:"card" },
     el("div", { class:"row between" }, el("h2", { text:"Wyniki grupy" }), el("div", { style:"flex:1 1 200px;max-width:280px" }, pick)),
     rows ? el("div", { class:"grid3" },
-      el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Wpisało się" }), el("span", { class:"v", text:`${done.length}/${A.clients.length}` })),
+      el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Wpisało się" }), el("span", { class:"v", text:`${done.length}/${expected}` }), absent.size ? el("span", { class:"small muted", text:`nieobecni: ${A.clients.filter(c => absent.has(c.id)).length}` }) : null),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Śr. zmęczenie" }), el("span", { class:"v", text:avg })),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Stacje" }), el("span", { class:"v", text:((ws.find(w => w.id === wid) || {}).stations || []).length })))
       : el("p", { class:"muted", text:"Wczytuję wpisy…" }),
     el("div", { class:"row" }, S.config.features.requireStart ? openBtn(ws.find(w => w.id === wid)) : null, el("button", { onclick(){ loadResults(wid); }, text:"Odśwież" }), done.length ? el("button", { onclick(){ exportCsv(wid, done); }, text:"Pobierz CSV" }) : null))];
   const q = approvalCard(); if (q) out.unshift(q);
   if (rows && !A.clients.length) out.push(el("div", { class:"empty", text:"Nikt jeszcze nie założył konta. Wyślij klientom link do strony głównej i kod klubu." }));
-  if (rows) rows.forEach(({ client, log }) => { const draft = A.res.drafts && A.res.drafts.get(client.id); const newer = draft && (!log || (draft.saved_at || "") > (log.saved_at || "")) ? draft : null;
+  const toggleAbsent = async (client, on) => { const next = new Set(absent); if (on) next.add(client.id); else next.delete(client.id);
+    const { error } = await HZ.api.setAbsent(wid, [...next]); if (error){ toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; }
+    A.res.absent = next; toast(on ? `${client.name}: nieobecny/-a` : `${client.name}: obecny/-a`); render(); };
+  if (rows) rows.forEach(({ client, log }) => { if (isAbs({ client, log })){ out.push(el("div", { class:"card absent" }, el("div", { class:"row between", style:"flex-wrap:nowrap" },
+      el("span", {}, el("b", { text:client.name || "Klient" }), el("span", { class:"chip", style:"margin-left:6px", text:"nieobecny/-a" })),
+      el("button", { class:"ghost", onclick(){ toggleAbsent(client, false); }, text:"Cofnij" })))); return; }
+    const draft = A.res.drafts && A.res.drafts.get(client.id); const newer = draft && (!log || (draft.saved_at || "") > (log.saved_at || "")) ? draft : null;
     out.push(el("div", { class:"card" },
     el("div", { class:"row between" }, el("h3", { text:client.name || client.email || "Klient" }),
       el("div", { class:"row" }, log && log.fatigue != null ? el("span", { class:"chip", text:`Zmęczenie ${log.fatigue}/10` }) : null,
+        A.clients.some(c => c.id === client.id) && !log ? el("button", { class:"ghost", title:"Nie było na treningu – nie liczy się do „Wpisało się”", onclick(){ toggleAbsent(client, true); }, text:"Nieobecny" }) : null,
         A.clients.some(c => c.id === client.id) ? el("button", { onclick(){ openEntry(client, wid); }, text: log ? "Edytuj wyniki" : "Wpisz wyniki" }) : null,
         el("button", { class:"ghost", onclick(){ openClient(client.id); }, text:"Historia →" }))),
     client.manual ? el("span", { class:"chip", style:"align-self:flex-start", text:"bez konta · wpisuje trener" }) : null,
@@ -466,14 +477,14 @@ async function saveEntry(btn){
 async function syncManualRanking(c, logs){
   const cs = c.consent || {};
   if (!cs.ranking){ await HZ.api.deleteRanking(c.id); return; }
-  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankFull(logs || [], A.appr || {}, cs.health ? c.bodyweight : null, c.birthYear), hidden:false, updatedAt:new Date().toISOString() });
+  const rk = await HZ.api.saveRanking(c.id, { name:c.name, ...HZ.rankFull(logs || [], A.appr || {}, cs.health ? c.bodyweight : null, c.birthYear, c.sex), hidden:false, updatedAt:new Date().toISOString() });
   if (rk.error) toast("Ranking się nie zaktualizował: opublikuj nowe reguły w Firebase.");
 }
 async function setManualConsent(c, patch, extra = {}){
   const consent = HZ.makeConsent(c.consent, { ...patch, by:"trener" });
   const { error } = await HZ.api.updateProfile(c.id, { consent, ...extra });
   if (error){ toast(error.code === "permission-denied" ? "Opublikuj nowe reguły w Firebase (Firestore → Rules)." : HZ.dbError(error)); return false; }
-  c.consent = consent; Object.assign(c, extra.bodyweight !== undefined ? { bodyweight:extra.bodyweight } : {}, extra.birthYear !== undefined ? { birthYear:extra.birthYear } : {});
+  c.consent = consent; Object.assign(c, extra.bodyweight !== undefined ? { bodyweight:extra.bodyweight } : {}, extra.birthYear !== undefined ? { birthYear:extra.birthYear } : {}, extra.sex !== undefined ? { sex:extra.sex } : {});
   const logs = A.clientId === c.id && A.clientLogs ? A.clientLogs : ((await HZ.api.logsOf(c.id)).data || []);
   await syncManualRanking(c, logs); A.rankRows = null; return true;
 }
@@ -514,12 +525,13 @@ function clientsView(){
         el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hcIn, el("span", { text:"Klient wyraził wyraźną zgodę na przetwarzanie masy ciała (dane o zdrowiu) do rankingu siły względnej." })),
         el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn, el("span", { class:"small", text:"Rok ur.:" }),
           el("input", { id:"cl-by", inputmode:"numeric", maxlength:"4", placeholder:"1990", value: c.birthYear ? String(c.birthYear) : "", style:"max-width:5rem;text-align:center" }),
+          el("select", { id:"cl-sex", "aria-label":"Płeć", value:c.sex || "", style:"max-width:7.5rem" }, el("option", { value:"", text:"płeć –" }), el("option", { value:"K", text:"Kobieta" }), el("option", { value:"M", text:"Mężczyzna" })),
           el("button", { async onclick(){ const v = HZ.parseNum(bwIn.value); if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg."); return; }
             if (v != null && !hcIn.checked){ toast("Zaznacz, że klient zgodził się na przetwarzanie masy ciała."); return; }
             const bw = v == null || !hcIn.checked ? null : Math.round(v * 10) / 10;
             const byv = document.getElementById("cl-by").value.trim(), by = byv ? parseInt(byv, 10) : null;
             if (by != null && !(by >= 1920 && by <= new Date().getFullYear() - 16)){ toast("Wpisz rok urodzenia, np. 1990 (16+)."); return; }
-            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw, birthYear:by })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })));
+            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw, birthYear:by, sex:document.getElementById("cl-sex").value || null })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })));
     const advBar = c.manual ? null : el("label", { class:"row small", style:"flex-wrap:nowrap;cursor:pointer;gap:8px" },
       el("input", { id:"cl-adv", type:"checkbox", style:"width:auto", checked: c.advanced || null, async onchange(ev){ const on = ev.target.checked; const { error } = await HZ.api.setAdvanced(c.id, on);
         if (error){ ev.target.checked = !on; toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; } c.advanced = on; toast(on ? "Klient zaawansowany: widzi funkcje „dla zaawansowanych”" : "Zwykły widok klienta"); render(); } }),

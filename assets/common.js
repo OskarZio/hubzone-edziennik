@@ -28,7 +28,7 @@ if (HZ.configured && window.firebase){
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, sex: d.sex === "K" || d.sex === "M" ? d.sex : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
@@ -116,6 +116,9 @@ HZ.api = {
   saveDraft: row => wrap(() => db.doc("drafts/" + row.user_id + "_" + row.workout_id).set(row)),
   deleteDraft: (uid, wid) => wrap(() => db.doc("drafts/" + uid + "_" + wid).delete()),
   draftsForWorkout: wid => wrap(async () => list(await db.collection("drafts").where("workout_id", "==", wid).get())),
+  /* attendance: clients marked absent for a training (trainer only) */
+  getAbsent: wid => wrap(async () => { const d = await db.doc("attendance/" + wid).get(); return d.exists ? (d.data().absent || []) : []; }),
+  setAbsent: (wid, absent) => wrap(() => db.doc("attendance/" + wid).set({ absent, at:new Date().toISOString() })),
   saveGroups: groups => wrap(() => db.doc("config/library").set({ groups }, { merge:true })),
   /* trainer's plan for the next training: weight and reps per exercise */
   planOf: uid => wrap(async () => { const d = await db.doc("plans/" + uid).get(); return d.exists ? (d.data().items || {}) : {}; }),
@@ -770,15 +773,24 @@ HZ.progEx = (ex, prog) => { if (!ex || !prog || prog === "std") return ex; const
 HZ.monthKey = () => HZ.todayISO().slice(0, 7);
 HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
 /* full ranking row: all-time + this month */
-HZ.rankFull = (logs, appr, bw, birthYear) => {
+HZ.rankFull = (logs, appr, bw, birthYear, sex) => {
   const all = HZ.computeStats(logs, appr), k = HZ.monthKey(), m = HZ.computeStats(logs, appr, { from:k + "-01" });
-  return { ...HZ.rankRow(all, bw), af: HZ.ageFactor(HZ.ageOf(birthYear)), m:{ k, points:m.points, strength:m.strength, workouts:m.workouts, prs:m.prs } };
+  const row = HZ.rankRow(all, bw), af = HZ.ageFactor(HZ.ageOf(birthYear)), coef = HZ.glCoef(bw, sex);
+  // points with multiplier: lifted load (body weight included for pull-ups/dips) × GL(sex, body weight) × age; body weight itself is never stored here
+  let sc;
+  if (coef){ sc = {}; const mainIds = new Set(S.workouts.flatMap(w => (w.stations || []).filter(st => HZ.secOf(st) === "main").map(st => st.exId))); let sum = 0, n = 0;
+    for (const [id, pct] of Object.entries(row.rel || {})){ const eff = pct * bw / 100; sc[id] = Math.round(eff * coef * af * 10); if (mainIds.has(id)){ sum += eff; n++; } }
+    if (n) sc.main = Math.round(sum * coef * af * 10); }
+  return { ...row, af, ...(sc ? { sc } : {}), m:{ k, points:m.points, strength:m.strength, workouts:m.workouts, prs:m.prs } };
 };
 /* relative strength: best working weight as % of body weight; bodyweight exercises (pull-ups, dips) count body + added load */
 HZ.isBwExercise = ex => ex ? (ex.bwBased ?? ex.type === "band") : false;
 /* age multiplier (simplified, like masters weightlifting): up to 35 → ×1.00, 36–50 → +1%/year, over 50 → +1.5%/year (max ×1.70) */
 HZ.ageOf = by => by ? new Date().getFullYear() - by : null;
 HZ.ageFactor = age => { if (!(age > 35)) return 1; const f = age <= 50 ? 1 + (age - 35) * 0.01 : 1.15 + (age - 50) * 0.015; return Math.round(Math.min(1.7, f) * 1000) / 1000; };
+/* sex + body weight: IPF GL coefficient (powerlifting "Goodlift" points, classic) – lets women and men of any weight compete in one table */
+HZ.GL = { M:[1199.72839, 1025.18162, 0.00921], K:[610.32796, 1045.59282, 0.03048] };
+HZ.glCoef = (bw, sex) => { const c = HZ.GL[sex]; if (!c || !(bw > 0)) return null; return 100 / (c[0] - c[1] * Math.exp(-c[2] * bw)); };
 HZ.relStrength = (bests, bw, assist = {}) => { const out = {}; if (!(bw > 0)) return out;
   for (const [id, kg] of Object.entries(bests || {})){ const ex = HZ.exById(id); out[id] = Math.round((HZ.isBwExercise(ex) ? bw + kg : kg) / bw * 100); }
   // pull-ups / dips with a band: body weight minus the band's help (only if never done without/with added weight)
@@ -842,11 +854,14 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const kgOf = r => { const b = r.bests || {};
     if (relEx === "main"){ const v = [...mainIds].map(id => b[id]).filter(x => x > 0); return v.length ? Math.round(v.reduce((a,c) => a + c, 0) * 100) / 100 : null; }
     return b[relEx] > 0 ? b[relEx] : null; };
-  const relCol = ["rel", "% MC", r => relOf(r) != null ? relOf(r) + "%" : "–"];
+  // pull-ups / dips: shown as body weight + extra (127% → "MC +27%"), sorting stays on the full %
+  const bwEx = relEx !== "main" && HZ.isBwExercise(HZ.exById(relEx));
+  const relTxt = v => v == null ? "–" : bwEx ? (v >= 100 ? `MC +${v - 100}%` : `MC −${100 - v}%`) : v + "%";
+  const relCol = ["rel", bwEx ? "MC + dociąż." : "% MC", r => relTxt(relOf(r))];
   const kgCol = ["kg", relEx === "main" ? "Suma kg" : "Ciężar", r => kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : "–"];
   const strengthView = rankSort === "rel" || rankSort === "kg" || rankSort === "adj";
-  const adjOf = r => relOf(r) != null ? Math.round(relOf(r) * (r.af || 1)) : null;
-  const adjCol = ["adj", "Z mnożn.", r => adjOf(r) != null ? adjOf(r) + " pkt" + ((r.af || 1) > 1 ? ` (×${String(r.af).replace(".", ",")})` : "") : "–"];
+  const adjOf = r => r.sc ? (relEx === "main" ? r.sc.main : r.sc[relEx]) ?? null : null;
+  const adjCol = ["adj", "Z mnożn.", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" + ((r.af || 1) > 1 ? ` (wiek ×${String(r.af).replace(".", ",")})` : "") : "–"];
   const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
   const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (r.m[k] || 0) : 0) : r[k];
   const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l]) => [k, l, r => field(r, k) ?? 0]) : RANK_COLS;
@@ -860,7 +875,8 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const board = BOARDS.find(b => b.key === (rankSort === "kg" || rankSort === "adj" ? "rel" : rankSort));
   const podiumRows = placed.filter(x => x.place !== "–").slice(0, 3);
   const podium = podiumRows.length ? el("div", { class:"podium" }, podiumRows.map(({ r, place }) => el("div", { class:"pod p" + place + (r.id === meId ? " me" : "") },
-    HZ.medal(place), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv", text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") + (rankSort === "kg" && relOf(r) != null ? ` · ${relOf(r)}%` : rankSort === "rel" && kgOf(r) != null ? ` · ${HZ.fmtKg(kgOf(r))} kg` : "") }))))
+    HZ.medal(place), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv" }, el("span", { text: col[2](r) + (board && board.key !== "rel" ? " pkt" : "") }),
+      el("span", { class:"pv2", text: rankSort === "kg" && relOf(r) != null ? relTxt(relOf(r)) : rankSort === "rel" && kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : rankSort === "adj" && relOf(r) != null ? relTxt(relOf(r)) : "\u00a0" })))))
     : el("p", { class:"small muted", text: rankSort === "rel" ? "Nikt jeszcze nie ma wyniku w tym ćwiczeniu z wpisaną masą ciała." : "Brak wyników." });
   const me = placed.find(x => x.r.id === meId);
   const exSel = strengthView && relIds.length ? el("select", { id:"rel-ex", "aria-label":"Ćwiczenie", onchange(e){ relEx = e.target.value; rerender(); } },
@@ -871,7 +887,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
         [["month", "📅 Miesięczny"], ["all", "♾️ Ogólny"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankPeriod === k), onclick(){ rankPeriod = k; rerender(); }, text:t }))),
       el("div", { class:"modes big", role:"group", "aria-label":"Rodzaj rankingu" },
         BOARDS.map(b => el("button", { type:"button", "aria-pressed":String(rankSort === b.key || (b.key === "rel" && (rankSort === "kg" || rankSort === "adj"))), onclick(){ rankSort = b.key; rerender(); }, text:b.label }))),
-      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "adj" ? " Z mnożnikiem: % masy ciała × mnożnik wieku (do 35 lat ×1, 36–50 lat +1% za rok, powyżej 50 +1,5% za rok), żeby starsi rywalizowali uczciwie. Wiek widzi tylko zawodnik i trener." : "") + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
+      el("p", { class:"small muted", text: board ? board.desc + (rankSort === "adj" ? " Z mnożnikiem: punkty IPF GL (jak w trójboju – uwzględniają masę ciała i płeć, więc kobiety i mężczyźni o różnej wadze rywalizują uczciwie) × mnożnik wieku (do 35 lat ×1, 36–50 lat +1% za rok, powyżej 50 +1,5% za rok). Wymaga wpisanej wagi i płci. Wagę, wiek i płeć widzi tylko zawodnik i trener." : "") + (rankSort === "kg" ? " Teraz posortowane po samym ciężarze." : "") : `Posortowano według: ${col[1]}. Kliknij nagłówek tabeli, aby zmienić.` }),
       opts.relPrompt && strengthView ? opts.relPrompt : null,
       strengthView ? el("div", { class:"modes", role:"group", "aria-label":"Sortuj według" },
         [["rel","% masy ciała"],["adj","Z mnożnikiem"],["kg","Ciężar (kg)"]].map(([k, t]) => el("button", { type:"button", "aria-pressed":String(rankSort === k), onclick(){ rankSort = k; rerender(); }, text:t }))) : null,

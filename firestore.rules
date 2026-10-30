@@ -55,7 +55,8 @@ service cloud.firestore {
             && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
       // klient: imię, masa ciała, zgody. Trener: to samo dla klientów (np. masa ciała za zgodą ustną). Rola trenera tylko ręcznie w konsoli.
       allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('isAdmin', false) != true))
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent', 'email', 'guest', 'convertedAt', 'birthYear'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent', 'email', 'guest', 'convertedAt', 'birthYear', 'sex'])
+        && request.resource.data.get('sex', null) in [null, 'K', 'M']
         && (request.resource.data.get('birthYear', null) == null || (request.resource.data.birthYear is int && request.resource.data.birthYear >= 1920 && request.resource.data.birthYear <= 2012))
         // gość zamienia się w konto: tylko on sam, po podpięciu e-maila i hasła (e-mail musi zgadzać się z logowaniem)
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email', 'guest', 'convertedAt'])
@@ -91,7 +92,8 @@ service cloud.firestore {
 
     // Ranking: widzą członkowie klubu; wiersz istnieje tylko za zgodą osoby (consent.ranking).
     function validRank(d) {
-      return d.keys().hasOnly(['name', 'workouts', 'streak', 'longest', 'prs', 'progress', 'volume', 'points', 'strength', 'rel', 'bests', 'hidden', 'updatedAt', 'm', 'af'])
+      return d.keys().hasOnly(['name', 'workouts', 'streak', 'longest', 'prs', 'progress', 'volume', 'points', 'strength', 'rel', 'bests', 'hidden', 'updatedAt', 'm', 'af', 'sc'])
+        && d.get('sc', {}) is map && d.get('sc', {}).size() <= 61
         && (d.get('af', 1) is number && d.get('af', 1) >= 1 && d.get('af', 1) <= 2)
         && d.name is string && d.name.size() <= 60
         && d.points is int && d.points >= 0 && d.points <= 100000
@@ -160,6 +162,11 @@ service cloud.firestore {
     match /plans/{uid} {
       allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
       allow write: if isAdmin() && isClient(uid);
+    }
+
+    // Obecność: lista nieobecnych na treningu, tylko trener.
+    match /attendance/{wid} {
+      allow read, write: if isAdmin();
     }
 
     // Ocena techniki: tylko trener.

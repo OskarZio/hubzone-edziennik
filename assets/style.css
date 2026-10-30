@@ -350,3 +350,14 @@ a.btn.primary{ background:var(--accent); color:var(--accent-ink); border-color:v
 .ph-screen{ gap:8px; padding:12px 8px; }
 .ph-app{ width:30px; height:30px; border-radius:8px; font-size:.95rem; }
 .ph-app.hz img{ width:26px; height:26px; }
+.card.absent{ opacity:.7; padding-block:10px; }
+.bwgrid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:end; }
+.bwgrid > button{ height:44px; }
+
+/* podium: fixed heights (1st tallest), value always on two short lines so long text can't make 2nd taller */
+.podium{ align-items:end; }
+.pod{ justify-content:flex-end; }
+.pod.p1{ min-height:168px; } .pod.p2{ min-height:142px; } .pod.p3{ min-height:124px; }
+.pod .pv{ display:flex; flex-direction:column; line-height:1.25; }
+.pod .pv > span{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%; }
+.pod .pv2{ font-size:.8rem; opacity:.85; }
