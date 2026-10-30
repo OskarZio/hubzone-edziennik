@@ -733,10 +733,15 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
         prs++; best[k] = v; bestReps[k] = reps; records[k] = rec; if (here) strength += HZ.PTS.pr;
       }
       else if (v === best[k] && reps > bestReps[k] && t !== "bw"){ bestReps[k] = reps; repPrs++; records[k] = rec; if (here) strength += HZ.PTS.repPr; }
-      if (t === "kg" && best[k] > 0) bests[e.exId] = Math.max(bests[e.exId] || 0, best[k]);
+      // body-weight exercises (pull-ups, dips) count from 0 kg = body weight only
+      if (t === "kg" && (best[k] > 0 || (best[k] === 0 && HZ.isBwExercise(HZ.exById(e.exId))))) bests[e.exId] = Math.max(bests[e.exId] || 0, best[k]);
     }
     if (here && !l.own && planned && hits / planned >= 0.8) strength += HZ.PTS.plan;
   }
+  // band-assisted body-weight exercises: lightest band reached = least help in kg (for % of body weight)
+  const assist = {};
+  for (const k of Object.keys(best).filter(x => x.endsWith("|band"))){ const id = k.split("|")[0]; if (!HZ.isBwExercise(HZ.exById(id))) continue;
+    const bs = S.config.bands, i = best[k]; assist[id] = i >= bs.length ? 0 : Math.round(HZ.bandKgMid(bs[i]) * 10) / 10; }
   const pct = Object.keys(first).filter(k => k.endsWith("|kg") && first[k] > 0 && best[k] !== first[k]).map(k => (best[k] - first[k]) / first[k] * 100);
   const nKg = Object.keys(first).filter(k => k.endsWith("|kg") && first[k] > 0).length;
   const progress = nKg && pct.length ? Math.round(pct.reduce((a,b) => a + b, 0) / nKg) : (nKg ? 0 : null);
@@ -744,7 +749,7 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   return {
     workouts:attended.size, streak, longest, prs, repPrs, progress, volume: Math.round(volume),
     points: attended.size * HZ.POINTS.workout + bonus, strength,
-    attendancePct, records: Object.values(records), bests, pending
+    attendancePct, records: Object.values(records), bests, assist, pending
   };
 };
 /* entries the trainer rejected don't drive the next suggestion */
@@ -771,11 +776,13 @@ HZ.rankFull = (logs, appr, bw) => {
 };
 /* relative strength: best working weight as % of body weight; bodyweight exercises (pull-ups, dips) count body + added load */
 HZ.isBwExercise = ex => ex ? (ex.bwBased ?? ex.type === "band") : false;
-HZ.relStrength = (bests, bw) => { const out = {}; if (!(bw > 0)) return out;
+HZ.relStrength = (bests, bw, assist = {}) => { const out = {}; if (!(bw > 0)) return out;
   for (const [id, kg] of Object.entries(bests || {})){ const ex = HZ.exById(id); out[id] = Math.round((HZ.isBwExercise(ex) ? bw + kg : kg) / bw * 100); }
+  // pull-ups / dips with a band: body weight minus the band's help (only if never done without/with added weight)
+  for (const [id, a] of Object.entries(assist || {})) if (out[id] == null) out[id] = Math.max(1, Math.round((bw - a) / bw * 100));
   return out; };
 /* what goes to the shared ranking: body weight itself never leaves the profile, only the percentages */
-HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, pending, repPrs, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw) }; };
+HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, assist, pending, repPrs, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw, assist) }; };
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [

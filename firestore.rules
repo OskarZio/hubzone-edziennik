@@ -53,8 +53,8 @@ service cloud.firestore {
             && request.resource.data.get('guest', false) == isAnon()
             && validConsent(request.resource.data.consent) && request.resource.data.consent.age16 == true
             && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
-      // klient: imię, masa ciała, zgody. Trener: to samo dla klientów bez konta. Rola trenera tylko ręcznie w konsoli.
-      allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('manual', false) == true))
+      // klient: imię, masa ciała, zgody. Trener: to samo dla klientów (np. masa ciała za zgodą ustną). Rola trenera tylko ręcznie w konsoli.
+      allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('isAdmin', false) != true))
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent', 'email', 'guest', 'convertedAt'])
         // gość zamienia się w konto: tylko on sam, po podpięciu e-maila i hasła (e-mail musi zgadzać się z logowaniem)
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['email', 'guest', 'convertedAt'])

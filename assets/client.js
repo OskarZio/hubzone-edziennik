@@ -500,7 +500,11 @@ function bwForm(hint){
   const inp = el("input", { id:"acc-bw", inputmode:"decimal", placeholder:"np. 78,5", value: C.profile && C.profile.bodyweight ? HZ.fmtKg(C.profile.bodyweight) : "", style:"max-width:7rem;text-align:center" });
   const hasHealth = !!(C.profile.consent && C.profile.consent.health);
   const hc = el("input", { id:"acc-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: hasHealth || null });
+  const bw = C.profile.bodyweight, st = bw ? HZ.computeStats(C.logs, C.appr) : null, rel = bw ? HZ.relStrength(st.bests, bw, st.assist) : {};
+  const relTxt = Object.entries(rel).map(([id, v]) => ({ n:(HZ.exById(id) || {}).name, v })).filter(x => x.n).sort((a, b) => b.v - a.v).slice(0, 4).map(x => `${x.n} ${x.v}%`).join(" · ");
   return el("div", { class:"stack", style:"gap:6px" }, hint ? el("p", { class:"small", text:hint }) : null,
+    bw ? el("div", { class:"notice small" }, el("b", { text:`✓ Zapisana masa ciała: ${HZ.fmtKg(bw)} kg` }),
+      el("div", { text: relTxt ? "Twoja siła względna: " + relTxt : "Po pierwszym treningu z ciężarem lub podciąganiu zobaczysz tu % masy ciała." })) : null,
     el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hc,
       el("span", { text:"Wyrażam wyraźną zgodę na przetwarzanie mojej masy ciała (dane dotyczące zdrowia, art. 9 RODO) wyłącznie w celu obliczenia siły względnej w rankingu. Zgodę mogę wycofać w każdej chwili." })),
     el("div", { class:"row", style:"flex-wrap:nowrap" }, el("label", { class:"f", style:"flex:1" }, "Masa ciała (kg)", inp),

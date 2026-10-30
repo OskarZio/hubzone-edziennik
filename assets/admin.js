@@ -508,15 +508,15 @@ function clientsView(){
     const hcIn = el("input", { id:"cl-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: cs.health || null });
     const rkIn = el("input", { id:"cl-rank", type:"checkbox", style:"width:auto;margin-top:3px", checked: cs.ranking || null,
       async onchange(ev){ if (await setManualConsent(c, { ranking:ev.target.checked })) { toast(ev.target.checked ? "Klient w rankingu" : "Usunięto z rankingu"); render(); } } });
-    const bwBar = c.manual ? el("div", { class:"card" }, el("h3", { text:"Zgody i masa ciała" }),
-        el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rkIn, el("span", { text:"Klient zgodził się na udział w rankingu grupy." })),
+    const bwBar = el("div", { class:"card" }, el("h3", { text: c.manual ? "Zgody i masa ciała" : "Masa ciała" }),
+        c.manual ? el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, rkIn, el("span", { text:"Klient zgodził się na udział w rankingu grupy." })) : null,
+        c.manual ? null : el("p", { class:"small muted", style:"margin:0", text: c.bodyweight ? `Aktualnie: ${HZ.fmtKg(c.bodyweight)} kg${cs.by === "trener" ? " (wpisane przez Ciebie)" : " (wpisał/-a klient)"}.` : "Klient może wpisać wagę sam (Konto) albo wpisz ją tutaj, jeśli zgodził się ustnie." }),
         el("label", { class:"row small consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:8px;cursor:pointer" }, hcIn, el("span", { text:"Klient wyraził wyraźną zgodę na przetwarzanie masy ciała (dane o zdrowiu) do rankingu siły względnej." })),
         el("div", { class:"row" }, el("span", { class:"small", text:"Masa ciała:" }), bwIn,
           el("button", { async onclick(){ const v = HZ.parseNum(bwIn.value); if (v != null && (v < 25 || v > 300)){ toast("Wpisz masę ciała w kg."); return; }
             if (v != null && !hcIn.checked){ toast("Zaznacz, że klient zgodził się na przetwarzanie masy ciała."); return; }
             const bw = v == null || !hcIn.checked ? null : Math.round(v * 10) / 10;
-            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })))
-      : el("p", { class:"small muted", text: c.bodyweight ? `Masa ciała: ${HZ.fmtKg(c.bodyweight)} kg` : "Masa ciała: nie wpisana (klient wpisuje ją w Konto, za zgodą)" });
+            if (await setManualConsent(c, { health: bw != null }, { bodyweight:bw })) { toast(bw != null ? "Zapisano masę ciała" : "Usunięto masę ciała"); render(); } }, text:"Zapisz" })));
     const advBar = c.manual ? null : el("label", { class:"row small", style:"flex-wrap:nowrap;cursor:pointer;gap:8px" },
       el("input", { id:"cl-adv", type:"checkbox", style:"width:auto", checked: c.advanced || null, async onchange(ev){ const on = ev.target.checked; const { error } = await HZ.api.setAdvanced(c.id, on);
         if (error){ ev.target.checked = !on; toast(error.code === "permission-denied" ? "Wgraj nowe reguły bazy (skrypt u.py)." : HZ.dbError(error)); return; } c.advanced = on; toast(on ? "Klient zaawansowany: widzi funkcje „dla zaawansowanych”" : "Zwykły widok klienta"); render(); } }),
