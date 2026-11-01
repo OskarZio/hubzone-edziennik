@@ -75,10 +75,10 @@ function body(){
           const old = byId.get(c.id) || {};
           const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear, c.sex), hidden: old.hidden === true };
           const { updatedAt, id, ...prev } = old;
+          byId.set(c.id, { id:c.id, ...row });   // the trainer always sees freshly calculated results from all trainings
           if (JSON.stringify(prev) === JSON.stringify(row)) continue;
           const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() });
-          if (w.error){ denied = true; continue; }
-          byId.set(c.id, { id:c.id, ...row });
+          if (w.error) denied = true;
         }
         if (denied) toast("Części wierszy nie zapisano: wgraj nowe reguły bazy (skrypt u.py albo Firestore → Rules).");
         A.rankRows = [...byId.values()]; if (r.error) toast(HZ.dbError(r.error)); render(); });
