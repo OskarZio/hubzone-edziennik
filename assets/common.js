@@ -856,7 +856,26 @@ HZ.progEx = (ex, prog) => { if (!ex || !prog || prog === "std") return ex; const
 HZ.monthKey = () => HZ.todayISO().slice(0, 7);
 HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
 /* full ranking row: all-time + this month */
-HZ.RANK_V = 4;   // version of the ranking formula (rows from older app versions get recalculated by the trainer panel)
+HZ.RANK_V = 4;
+/* trainer: recalculate (and save) the ranking rows of everyone who agreed, from all their trainings; returns the fresh rows */
+HZ.rebuildRanking = async ({ users, logs, appr }) => {
+  const r = await HZ.api.ranking(); const rows = (r && r.data) || [];
+  const admins = new Set(users.filter(u => u.is_admin).map(u => u.id));
+  const clients = users.filter(u => !u.is_admin), consent = new Set(clients.filter(c => c.consent && c.consent.ranking).map(c => c.id));
+  const drop = rows.filter(x => admins.has(x.id) || !consent.has(x.id));   // trainers and people without consent are not ranked
+  for (const x of drop) await HZ.api.deleteRanking(x.id);
+  const byId = new Map(rows.filter(x => !drop.includes(x)).map(x => [x.id, x])); let denied = false;
+  for (const c of clients.filter(c => consent.has(c.id))){
+    const mine = logs.filter(l => l.user_id === c.id); if (!mine.length) continue;
+    const old = byId.get(c.id) || {};
+    const row = { name:c.name || "", ...HZ.rankFull(mine, appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear, c.sex), hidden: old.hidden === true };
+    const { updatedAt, id, ...prev } = old;
+    byId.set(c.id, { id:c.id, ...row });   // the trainer always sees freshly calculated results
+    if (JSON.stringify(prev) === JSON.stringify(row)) continue;
+    const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() }); if (w.error) denied = true;
+  }
+  return { rows:[...byId.values()], denied, error: r && r.error };
+};   // version of the ranking formula (rows from older app versions get recalculated by the trainer panel)
 HZ.rankFull = (logs, appr, bw, birthYear, sex) => {
   // no body weight / sex entered: still ranked, with an estimate (average body weight, mean of both GL formulas), marked with *
   const est = !(bw > 0) || !HZ.GL[sex], bwUse = bw > 0 ? bw : sex === "K" ? 65 : sex === "M" ? 80 : 75;
@@ -946,8 +965,13 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const relCol = ["rel", bwEx ? "MC + dociąż." : "% MC", r => relTxt(relOf(r))];
   const kgCol = ["kg", relEx === "main" ? "Suma kg" : "Ciężar", r => kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : "–"];
   const strengthView = rankSort === "rel" || rankSort === "kg" || rankSort === "adj";
-  const adjOf = r => r.sc ? (relEx === "main" ? r.sc.main : r.sc[relEx]) ?? null : null;
-  const adjCol = ["adj", "Punkty siły", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" + (r.sc && r.sc.est ? "*" : "") : "–"];
+  const coef75 = (HZ.glCoef(75, "M") + HZ.glCoef(75, "K")) / 2;
+  const scOld = r => { const sc = {}; let sum = 0, n = 0;   // older row without points: estimate from best weights (75 kg, both sexes), marked *
+    for (const [id, kg] of Object.entries(r.bests || {})){ const ex = HZ.exById(id); if (!ex) continue; const eff = HZ.isBwExercise(ex) ? 75 + kg : kg; sc[id] = Math.round(eff * coef75 * 10); if (mainIds.has(id)){ sum += eff; n++; } }
+    if (n) sc.main = Math.round(sum * coef75 * 10); sc.est = 1; return sc; };
+  const scOf = r => r.sc || (r._sc = r._sc || scOld(r));
+  const adjOf = r => { const sc = scOf(r); return (relEx === "main" ? sc.main : sc[relEx]) ?? null; };
+  const adjCol = ["adj", "Punkty siły", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" + (scOf(r).est ? "*" : "") : "–"];
   const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
   const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (k === "progress" ? (r.m.progress ?? null) : (r.m[k] || 0)) : (k === "progress" ? null : 0)) : r[k];
   const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l, f]) => [k, l, r => f({ ...r, [k]: field(r, k) })]) : RANK_COLS;

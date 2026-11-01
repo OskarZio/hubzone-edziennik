@@ -21,9 +21,17 @@ async function loadAll(){
     if (!A.profile || !A.profile.is_admin){ render(); return; }
     await Promise.all([HZ.loadConfig(), HZ.loadWorkouts(), loadClients(), loadSettings()]);
     Promise.all((A.admins || []).map(x => HZ.api.deleteRanking(x.id))).catch(() => {});   // trainers never appear in the ranking
+    if (S.config.rankingEnabled !== false) refreshRanking().catch(() => {});   // keep everybody's ranking row fresh as soon as the trainer logs in
     A.error = null;
   } catch(e){ console.error(e); A.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; A.checked = true; }
   render();
+}
+/* recalculate everyone's ranking from all trainings and save it, so clients see the same, current numbers */
+async function refreshRanking(){
+  const res = await HZ.rebuildRanking({ users:[...(A.admins || []), ...A.clients], logs:A.allLogs || [], appr:A.appr || {} });
+  if (res.denied && !A.deniedShown){ A.deniedShown = true; toast("Części wierszy rankingu nie zapisano: wgraj nowe reguły bazy (skrypt u.py)."); }
+  if (res.error) toast(HZ.dbError(res.error));
+  A.rankRows = res.rows;
 }
 async function loadClients(){
   const [pr, lg, ap] = await Promise.all([HZ.api.users(), HZ.api.allLogs(), HZ.api.allApprovals()]);
@@ -62,26 +70,7 @@ function body(){
   if (A.tab === "results") return resultsView();
   if (A.tab === "clients") return clientsView();
   if (A.tab === "ranking"){
-    if (!A.rankRows){ HZ.api.ranking().then(async r => {
-        const rows = r.data || []; const admins = new Set((A.admins || []).map(x => x.id));
-        const consent = new Set(A.clients.filter(c => c.consent && c.consent.ranking).map(c => c.id));
-        const drop = rows.filter(x => admins.has(x.id) || !consent.has(x.id));   // trainers and people without consent are not ranked
-        for (const x of drop) await HZ.api.deleteRanking(x.id);
-        // rebuild rows of everyone who agreed (also clients who have not opened the app since their results were entered)
-        const keep = rows.filter(x => !drop.includes(x)); const byId = new Map(keep.map(x => [x.id, x]));
-        let denied = false;
-        for (const c of A.clients.filter(c => consent.has(c.id))){
-          const logs = (A.allLogs || []).filter(l => l.user_id === c.id); if (!logs.length) continue;
-          const old = byId.get(c.id) || {};
-          const row = { name:c.name || "", ...HZ.rankFull(logs, A.appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear, c.sex), hidden: old.hidden === true };
-          const { updatedAt, id, ...prev } = old;
-          byId.set(c.id, { id:c.id, ...row });   // the trainer always sees freshly calculated results from all trainings
-          if (JSON.stringify(prev) === JSON.stringify(row)) continue;
-          const w = await HZ.api.saveRanking(c.id, { ...row, updatedAt:new Date().toISOString() });
-          if (w.error) denied = true;
-        }
-        if (denied) toast("Części wierszy nie zapisano: wgraj nowe reguły bazy (skrypt u.py albo Firestore → Rules).");
-        A.rankRows = [...byId.values()]; if (r.error) toast(HZ.dbError(r.error)); render(); });
+    if (!A.rankRows){ refreshRanking().then(() => render());
       return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
     const inRank = new Set(A.rankRows.map(x => x.id));
     const missing = A.clients.filter(c => !inRank.has(c.id)).map(c => {

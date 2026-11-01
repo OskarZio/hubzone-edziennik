@@ -102,6 +102,10 @@ async function syncRanking(){
   if (!error){ C.rankKey = key; if (C.rankRows) loadRanking(); }
 }
 async function loadRanking(){
+  if (C.profile && C.profile.is_admin){   // trainer's account: recalculate everybody first (same as the trainer panel)
+    const [u, l, ap] = await Promise.all([HZ.api.users(), HZ.api.allLogs(), HZ.api.allApprovals()]);
+    if (!u.error && !l.error){ const res = await HZ.rebuildRanking({ users:u.data, logs:l.data, appr:Object.fromEntries(((ap && ap.data) || []).map(a => [a.id, a])) }); C.rankRows = res.rows; render(); return; }
+  }
   const { data, error } = await HZ.api.ranking();
   C.rankRows = error ? [] : data; if (error) toast(HZ.dbError(error)); render();
 }
