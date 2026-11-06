@@ -244,6 +244,7 @@ function stationCard(w, st, exBase, label, d, isSuper){
   const tRir = rirOn() ? HZ.targetRir(w, st) : null;
   const sg = tipFor(w, st, exBase, mode);
   reshape(d, st, sets, ex);
+  const auto = autoFill(d, st, sets, ex, sg);
   HZ.refreshWarmups(ex, sets);
   const curLoad = (sets.find(s => !s.warmup) || {}).load;
   const isMain = HZ.secOf(st) === "main";
@@ -257,7 +258,7 @@ function stationCard(w, st, exBase, label, d, isSuper){
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
     HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }, exBase),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),
-    isMain && (mode === "kg" || mode === "band") && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, () => { saveDrafts(); render(); }, `w${w.id}-${st.id}`) : null,
+    isMain && (mode === "kg" || mode === "band") && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, () => { saveDrafts(); render(); }, `w${w.id}-${st.id}`, auto) : null,
     HZ.setsEditor(ex, sets, `w${w.id}-${st.id}`, structural => { saveDrafts(); if (structural) render(); else updateState(); }, { repsHint:sg.reps, noWarmup:!isMain, noRir:!rirOn() }),
     (() => { const stt = stationState(w, st, d); const name = label.split(" · ")[0];
       return el("div", { class:"stsave" }, el("span", { class:"state " + stt.kind, "data-state":st.id, text:stt.text }),
@@ -599,6 +600,25 @@ function joinCard(){
     logoutButton("ghost"));
 }
 
+/* suggested / trainer-approved weight → working sets and warm-ups filled in automatically (until the client types something) */
+function autoFill(d, st, sets, ex, sg){
+  d.autoLoad = d.autoLoad || {};
+  const work = sets.filter(x => !x.warmup), warm = sets.filter(x => x.warmup), key = sg && sg.next != null ? JSON.stringify(sg.next) : null;
+  const typed = work.some(x => x.reps != null) || warm.some(x => x.reps != null);
+  const prev = d.autoLoad[st.id];
+  // old drafts (opened before the tip / trainer's plan existed): update once while no reps are typed and all working sets have the same weight
+  const same = work.every(x => JSON.stringify(x.load) === JSON.stringify(work[0] && work[0].load));
+  const untouched = !typed && (prev === undefined ? same : work.every(x => x.load == null || x.load === "" || JSON.stringify(x.load) === prev));
+  let changed = false;
+  if (key && untouched && work.some(x => JSON.stringify(x.load) !== key)){ work.forEach(x => { x.load = sg.next; }); warm.forEach(x => { if (x.reps == null) x.manual = false; }); changed = true; }
+  if (key && untouched) d.autoLoad[st.id] = key;
+  // a working weight is known (suggested or typed in by hand) but the warm-up is still empty → calculate it
+  const w0 = work[0] && work[0].load;
+  if (warm.length && w0 != null && w0 !== "" && (changed || warm.some(x => !x.manual && x.reps == null && (x.load == null || x.load === "")))){
+    const before = JSON.stringify(sets); HZ.refreshWarmups(ex, sets); if (JSON.stringify(sets) !== before) changed = true; }
+  if (changed) saveDrafts();
+  return key && untouched && JSON.stringify(w0) === key ? (sg.kind === "plan" ? "plan" : "tip") : null;
+}
 /* trainer edits the plan live: number of sets follows the new plan (empty sets only, typed ones stay) */
 function reshape(d, st, sets, ex){
   d.shape = d.shape || {}; const key = `${HZ.secOf(st) === "main" ? (st.warmup || 0) : 0}|${st.sets || 3}`;

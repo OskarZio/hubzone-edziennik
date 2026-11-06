@@ -550,7 +550,7 @@ HZ.modeToggle = (cur, onPick, exBase) => { const ok = exBase ? HZ.modesOf(exBase
 /* "target weight" for the working sets: warm-ups are calculated from it (W2 ≈60%, W3 ≈80%; W1 set by the trainer) */
 /* warm-up calculator: enter the working weight (or pick the working band) → W1, W2, W3 are filled in */
 HZ.loadName = (ex, v) => v === HZ.SCAP ? (ex.warmLabel || "aktywacja") : typeof v === "string" ? (v === "none" ? "bez gumy" : HZ.bandName(v)) : v === 0 ? "bez ciężaru" : v == null || v === "" ? "?" : HZ.fmtKg(v) + " kg";
-HZ.targetBox = (ex, sets, onSet, idp) => {
+HZ.targetBox = (ex, sets, onSet, idp, auto) => {
   const band = ex.type === "band";
   const work = sets.find(s => !s.warmup), warm = sets.filter(s => s.warmup);
   const cur = work ? (band ? (work.load || null) : (typeof work.load === "number" ? work.load : null)) : null;
@@ -576,7 +576,8 @@ HZ.targetBox = (ex, sets, onSet, idp) => {
       el("li", {}, "Kliknij ", el("b", { text: band ? "„Rozpisz rozgrzewkę”" : "„Oblicz serie wstępne”" }), " – W1, W2… wypełnią się same.")),
     el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px" }, el("div", { style: band ? "flex:1;min-width:0" : "" }, field),
       el("button", { type:"button", class: cur == null ? "primary" : "", onclick: go, text: band ? "Rozpisz rozgrzewkę" : "Oblicz serie wstępne" })),
-    plan ? el("div", { class:"calc-plan" }, el("span", { class:"small muted", text:"Twoja rozgrzewka:" }), el("b", { text:plan })) : null,
+    plan ? el("div", { class:"calc-plan" + (auto ? " auto" : "") }, el("span", { class:"small muted", text: auto === "plan" ? "✓ Wyliczone z zalecenia trenera:" : auto ? "✓ Wyliczone z podpowiedzi – gotowe do zrobienia:" : "Twoja rozgrzewka:" }), el("b", { text:plan }),
+      auto ? el("span", { class:"small muted", text:"Chcesz inny ciężar? Wpisz go powyżej i kliknij „Oblicz”." }) : null) : null,
     el("span", { class:"small muted", text: band ? "Zaczynasz od mocniejszej gumy (więcej pomocy) i schodzisz do gumy roboczej." : "W2 ≈60%, W3 ≈80% ciężaru roboczego, zaokrąglone do talerzy." }));
 };
 /* dedicated guide for warm-up sets (opens over the page) */

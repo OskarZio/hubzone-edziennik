@@ -379,3 +379,5 @@ a.btn.primary{ background:var(--accent); color:var(--accent-ink); border-color:v
 .wg-row{ display:grid; grid-template-columns:36px 1fr auto; gap:8px; align-items:center; border:1px solid var(--line); border-radius:8px; padding:6px 8px; font-size:.9rem; }
 .wg-row.warm{ border-style:dashed; } .wg-row.warm .mk-n{ color:#3d63c9; }
 @media (min-width:640px){ .wg-full{ align-items:center; } }
+.calc-plan.auto{ border-style:solid; border-color:#2f8a2f; background:rgba(47,138,47,.08); }
+.calc-plan.auto > .small:first-child{ color:#2f8a2f; font-weight:700; }
