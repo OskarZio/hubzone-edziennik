@@ -166,7 +166,8 @@ service cloud.firestore {
 
     // Obecność: lista nieobecnych na treningu, tylko trener.
     match /attendance/{wid} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() || (signedIn() && request.auth.uid in resource.data.get('absent', []));   // a client sees only that they were marked absent
+      allow write: if isAdmin();
     }
 
     // Ocena techniki: tylko trener.

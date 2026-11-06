@@ -11,7 +11,10 @@ const C = { preview:PREVIEW, onb: PREVIEW ? 0 : undefined, appr:{}, plan:{}, ses
 function render(){ HZ.swap(app, view()); }
 const draftsKey = () => "hz-drafts-" + (C.session ? C.session.user.id : "x");
 const ownKey = () => "hz-own-" + (C.session ? C.session.user.id : "x");
-const saveDrafts = (() => { let t; return () => { clearTimeout(t); t = setTimeout(() => HZ.LS.set(draftsKey(), C.drafts), 400); pushDraft(); }; })();
+/* remember the day when results were first typed into a training (only those typed on the training day can be completed later) */
+const stampDrafts = () => { const today = HZ.todayISO();
+  for (const d of Object.values(C.drafts || {})) if (d && !d.typedOn && d.st && Object.values(d.st).some(sets => (sets || []).some(x => x.reps != null))) d.typedOn = today; };
+const saveDrafts = (() => { let t; return () => { stampDrafts(); clearTimeout(t); t = setTimeout(() => HZ.LS.set(draftsKey(), C.drafts), 400); pushDraft(); }; })();
 /* unsent results go to the trainer as a draft (a few seconds after typing) */
 const pushDraft = (() => { let t, last = ""; return () => { clearTimeout(t); t = setTimeout(async () => {
   if (!C.session || !C.profile) return; const w = S.workouts.find(x => x.id === currentId()); if (!w || isLocked(w)) return;
@@ -40,6 +43,7 @@ async function loadAll(){
       if (lg.error) throw lg.error;
       C.logs = lg.data.sort((a,b) => (a.date||"").localeCompare(b.date||""));
       const pl = await HZ.api.planOf(uid); C.plan = pl.data || {};
+      loadAbsent(uid);
       const ap = await HZ.api.approvalsOf(uid); C.appr = Object.fromEntries((ap.data || []).map(a => [a.id, a]));
       HZ.applyHolo(); HZ.rirOn = rirOn();
       if (S.config.rankingEnabled && C.profile.consent && C.profile.consent.ranking) HZ.api.ranking().then(r => { if (!r.error){ C.rankRows = r.data; render(); } });
@@ -50,6 +54,7 @@ async function loadAll(){
     C.error = null;
   } catch(e){ console.error(e); C.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; }
   C.drafts = HZ.LS.get(draftsKey()) || {}; C.own = HZ.LS.get(ownKey());
+  for (const d of Object.values(C.drafts)) if (d && !d.typedOn && d.st && Object.values(d.st).some(sets => (sets || []).some(x => x.reps != null))) d.typedOn = "legacy";   // typed before this rule existed
   C.loaded = true; render();
 }
 
@@ -127,14 +132,20 @@ const inGroup = w => !HZ.groupsOn() || !myGroup() || (w.group || "") === myGroup
 const todays = () => HZ.sortedWorkouts().filter(w => w.date === HZ.todayISO() && inGroup(w));
 function currentId(){ const ws = HZ.sortedWorkouts(); if (C.sel && ws.some(w => w.id === C.sel)) return C.sel; const t = todays(); return t.length === 1 ? t[0].id : null; }
 /* earlier trainings with something typed in but not sent (or only partly saved) */
+/* earlier trainings to complete: only if you were there – something sent, or results typed on the training day – and the trainer didn't mark you absent */
 function toFinish(){
   const today = HZ.todayISO();
-  return HZ.sortedWorkouts().filter(w => w.date < today).filter(w => {
+  return HZ.sortedWorkouts().filter(w => w.date < today && !(C.absentW && C.absentW.has(w.id))).filter(w => {
     const d = C.drafts[w.id], log = C.logs.find(l => l.workout_id === w.id);
-    const typed = d && d.st && Object.values(d.st).some(sets => (sets || []).some(x => x.reps != null));
+    const typed = d && d.st && (d.typedOn === w.date || d.typedOn === "legacy") && Object.values(d.st).some(sets => (sets || []).some(x => x.reps != null));
     const visible = (w.stations || []).filter(st => HZ.exById(st.exId) && (HZ.secOf(st) === "main" || HZ.feat("acc", C.profile))).length;
     if (log) return (log.entries || []).length < visible || (typed && JSON.stringify(buildEntries(w, d)) !== JSON.stringify(log.entries));
     return typed; }).reverse();
+}
+async function loadAbsent(uid){
+  const today = HZ.todayISO(), cand = HZ.sortedWorkouts().filter(w => w.date < today && (C.drafts[w.id] || C.logs.some(l => l.workout_id === w.id))).slice(-8);
+  const res = await Promise.all(cand.map(w => HZ.api.getAbsent(w.id).then(r => !r.error && (r.data || []).includes(uid) ? w.id : null)));
+  C.absentW = new Set(res.filter(Boolean)); if (C.absentW.size) render();
 }
 function finishCard(){
   const list = toFinish(); if (!list.length) return null;
@@ -194,6 +205,8 @@ function todayView(){
   const wid = currentId(); const w = ws.find(x => x.id === wid);
   if (!w) return [groupBar, noTraining(), finishCard()];
   const saved = C.logs.find(l => l.workout_id === w.id);
+  if (w.date < HZ.todayISO() && C.absentW && C.absentW.has(w.id) && !saved) return [el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ C.sel = null; render(); }, text:"← Dzisiejszy trening" }),
+    el("div", { class:"card locked" }, el("h3", { text:"Nie było Cię na tym treningu" }), el("p", { class:"small muted", text:"Trener oznaczył Cię jako nieobecnego/-ą, więc tego treningu nie uzupełnisz. Jeśli to pomyłka, napisz do trenera." }))];
   const back = C.sel && w.date !== HZ.todayISO() ? el("button", { class:"ghost", style:"align-self:flex-start", onclick(){ C.sel = null; render(); }, text:"← Dzisiejszy trening" }) : null;
   if (isLocked(w)) return [back, ...lockedView(ws, w, saved)];
   const d = draftFor(w);
