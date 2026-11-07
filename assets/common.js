@@ -33,7 +33,7 @@ const googleErr = e => { if (e && e.code === "auth/operation-not-allowed") e.cod
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, sex: d.sex === "K" || d.sex === "M" ? d.sex : null, created_at:d.createdAt || null, consent: d.consent || null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, sex: d.sex === "K" || d.sex === "M" ? d.sex : null, created_at:d.createdAt || null, consent: d.consent || null, photo: typeof d.photo === "string" && d.photo.startsWith("data:image/jpeg;base64,") ? d.photo : null } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
@@ -94,6 +94,7 @@ HZ.api = {
   deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid);
     await db.doc("plans/" + uid).delete().catch(() => {});
     for (const c of ["drafts", "approvals", "technique", "ideas"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
+  setPhoto: (uid, photo) => wrap(() => db.doc("users/" + uid).update({ photo: photo || null })),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
   updateProfile: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
   users: () => wrap(async () => (await db.collection("users").get()).docs.map(d => asProfile(d.id, d.data()))),
@@ -890,7 +891,7 @@ HZ.rebuildRanking = async ({ users, logs, appr }) => {
   for (const c of clients.filter(c => consent.has(c.id))){
     const mine = logs.filter(l => l.user_id === c.id); if (!mine.length) continue;
     const old = byId.get(c.id) || {};
-    const row = { name:c.name || "", ...HZ.rankFull(mine, appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear, c.sex), hidden: old.hidden === true };
+    const row = { name:c.name || "", ...(c.photo ? { photo:c.photo } : {}), ...HZ.rankFull(mine, appr || {}, c.consent.health ? c.bodyweight : null, c.birthYear, c.sex), hidden: old.hidden === true };
     const { updatedAt, id, ...prev } = old;
     byId.set(c.id, { id:c.id, ...row });   // the trainer always sees freshly calculated results
     if (JSON.stringify(prev) === JSON.stringify(row)) continue;
@@ -959,6 +960,25 @@ HZ.myRankMessage = (rows, meId) => {
   return { kind:"go", text:`💪 ${place}. miejsce w tym miesiącu. Do podium brakuje Ci ${toPod} pkt – każdy trening to ${HZ.POINTS.workout} pkt, a seria z rzędu daje bonus.` };
 };
 /* "who rules this month": small banner on the start screen – only the #1 in each category (all of them on a tie), tap → that ranking */
+/* profile picture: photo if set, otherwise coloured initials */
+const AV_HUES = [8, 28, 145, 175, 205, 230, 275, 320, 95, 350];
+HZ.avatar = (r, cls = "av") => {
+  const name = (r && r.name) || "?";
+  if (r && typeof r.photo === "string" && r.photo.startsWith("data:image/jpeg;base64,")) return el("img", { class:cls + " av-img", src:r.photo, alt:"", title:name });
+  const hue = AV_HUES[[...name].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % AV_HUES.length];
+  return el("span", { class:cls, style:`--h:${hue}`, title:name, "aria-hidden":"true", text:name.trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase() });
+};
+/* chosen photo → small square JPEG (centre crop, ~160 px), stored as text in the profile */
+HZ.photoFromFile = file => new Promise((res, rej) => {
+  if (!file || !/^image\//.test(file.type)) return rej(new Error("To nie jest zdjęcie"));
+  const url = URL.createObjectURL(file), img = new Image();
+  img.onload = () => { URL.revokeObjectURL(url); const S = 160, c = document.createElement("canvas"); c.width = c.height = S;
+    const s = Math.min(img.naturalWidth, img.naturalHeight), x = c.getContext("2d");
+    x.fillStyle = "#fff"; x.fillRect(0, 0, S, S); x.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, S, S);
+    let q = 0.82, out = c.toDataURL("image/jpeg", q); while (out.length > 30000 && q > 0.4){ q -= 0.1; out = c.toDataURL("image/jpeg", q); } res(out); };
+  img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("Nie udało się wczytać zdjęcia")); };
+  img.src = url;
+});
 HZ.monthCrown = (rows, meId, onOpen) => {
   const k = HZ.monthKey(), mine = r => r.m && r.m.k === k ? r.m : {};
   const vis = (rows || []).filter(r => !r.hidden);
@@ -972,16 +992,13 @@ HZ.monthCrown = (rows, meId, onOpen) => {
   const live = cats.filter(c => c.kings.length);
   if (!live.length) return el("div", { class:"crown", role:"button", tabindex:"0", onclick: open("points") }, el("span", { class:"crown-ico", text:"👑" }),
     el("div", { class:"crown-txt" }, el("span", { class:"eyebrow", text:`${Mon} · korona wolna` }), el("span", { class:"small", text:`Pierwszy trening w tym miesiącu daje ${HZ.POINTS.workout} pkt.` })));
-  const initials = n => (n || "?").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const HUES = [8, 28, 145, 175, 205, 230, 275, 320, 95, 350];
-  const hue = n => HUES[[...(n || "")].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % HUES.length];
   const who = ks => ks.length === 1 ? ks[0].name : ks.length === 2 ? `${ks[0].name} & ${ks[1].name}` : `${ks[0].name} +${ks.length - 1}`;
   return el("div", { class:"crown pod-crown" },
     el("span", { class:"eyebrow crown-head", text:`👑 ${Mon} · królują` }),
     el("div", { class:"cpods" }, cats.map(c => { const ks = c.kings, shown = ks.slice(0, 3);
       return el("button", { type:"button", class:"cpod" + (ks.length ? "" : " empty"), onclick: open(c.key),
           "aria-label": ks.length ? `${c.label}: ${ks.map(r => r.name).join(", ")} – otwórz ranking` : `${c.label}: jeszcze nikt – otwórz ranking` },
-        el("span", { class:"cpod-avs" }, ks.length ? shown.map(r => el("span", { class:"cpod-av" + (r.id === meId ? " me" : ""), style:`--h:${hue(r.name)}`, title:r.name || "", text:initials(r.name) }))
+        el("span", { class:"cpod-avs" }, ks.length ? shown.map(r => HZ.avatar(r, "cpod-av" + (r.id === meId ? " me" : "")))
           : el("span", { class:"cpod-av none", text:"?" })),
         el("span", { class:"cpod-who" + (ks.some(r => r.id === meId) ? " me" : ""), text: ks.length ? who(ks) : "wolne" }),
         el("span", { class:"cpod-step" }, el("span", { class:"cpod-val", text: ks.length ? c.txt(c.best) : "–" }), el("span", { class:"cpod-cat", text:`${c.ico} ${c.label}` }))); })));
@@ -1038,7 +1055,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const board = BOARDS.find(b => b.key === (rankSort === "kg" || rankSort === "adj" ? "rel" : rankSort));
   const podiumRows = placed.filter(x => x.place !== "–").slice(0, 3);
   const podium = podiumRows.length ? el("div", { class:"podium" }, podiumRows.map(({ r, place }) => el("div", { class:"pod p" + place + (r.id === meId ? " me" : "") },
-    HZ.medal(place), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv" }, el("span", { text: col[2](r) + (rankSort === "points" ? " pkt" : "") }),
+    el("span", { class:"pod-av" }, HZ.avatar(r, "av av-lg"), HZ.medal(place, true)), el("b", { text:r.name || "Uczestnik" }), el("span", { class:"pv" }, el("span", { text: col[2](r) + (rankSort === "points" ? " pkt" : "") }),
       el("span", { class:"pv2", text: rankSort === "kg" && relOf(r) != null ? relTxt(relOf(r)) : rankSort === "rel" && kgOf(r) != null ? HZ.fmtKg(kgOf(r)) + " kg" : rankSort === "adj" && relOf(r) != null ? relTxt(relOf(r)) : "\u00a0" })))))
     : el("p", { class:"small muted", text: rankSort === "rel" ? "Nikt jeszcze nie ma wyniku w tym ćwiczeniu z wpisaną masą ciała." : "Brak wyników." });
   const me = placed.find(x => x.r.id === meId);
@@ -1062,7 +1079,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
         el("thead", {}, el("tr", {}, el("th", { text:"#" }), el("th", { text:"Imię" }),
           cols.map(([k, label]) => el("th", { class: k === rankSort ? "on" : null }, el("button", { type:"button", class:"thsort", onclick(){ rankSort = k; rerender(); }, text: label + (k === rankSort ? " ↓" : "") }))))),
         el("tbody", {}, placed.map(({ r, place }) => el("tr", { class: r.id === meId ? "me" : null },
-          el("td", {}, typeof place === "number" && place <= 3 ? HZ.medal(place, true) : String(place)), el("td", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }),
+          el("td", {}, typeof place === "number" && place <= 3 ? HZ.medal(place, true) : String(place)), el("td", {}, el("span", { class:"rk-name" }, HZ.avatar(r, "av av-sm"), el("span", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }))),
           cols.map(([k,, f]) => el("td", { class: k === rankSort ? "on" : null, text:f(r) }))))))),
       strengthView ? el("p", { class:"small muted", text:"* wynik szacunkowy – brak wpisanej wagi lub płci (liczony dla przeciętnej wagi); wpisz je w Konto, żeby był dokładny. Punkty siły: ciężar × współczynnik masy ciała i płci (IPF GL) × wiek – wymagają wpisanej wagi i płci (Konto). % MC: ciężar jako procent masy ciała; przy podciąganiu i dipach „MC +X%” = masa ciała + X% dociążenia. Ciężar: najlepszy ciężar roboczy (Razem: suma). Kliknij nagłówek kolumny, żeby zmienić sortowanie." }) :
 el("p", { class:"small muted", text:`Punkty: za regularność (trening z grupą + seria piątków z rzędu). Postęp: o ile % wzrosła Twoja siła (ciężar + powtórzenia) w bojach głównych – maks. +${HZ.STEP_CAP}% za każdy kolejny trening; „–” = za mało treningów (min. 2). Seria: piątki z rzędu. Tonaż: ciężar × powtórzenia. Kliknij nagłówek kolumny, żeby zmienić sortowanie.` }))];

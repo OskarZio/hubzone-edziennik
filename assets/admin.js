@@ -516,9 +516,11 @@ function clientsView(){
                 A.clients = A.clients.filter(x => x.id !== c.id); A.clientId = null; A.confirmDelClient = null; A.rankRows = null; toast("Usunięto dane klienta"); render(); }, text:"Usuń na stałe" }),
               el("button", { onclick(){ A.confirmDelClient = null; render(); }, text:"Anuluj" })))
         : el("button", { class:"ghost", onclick(){ A.confirmDelClient = c.id; render(); }, text: c.manual ? "Usuń klienta" : "Usuń dane klienta (RODO)" }));
-    const consentBar = el("p", { class:"small muted", text: c.manual
+    const consentBar = el("div", { class:"stack", style:"gap:6px" }, c.photo ? el("div", { class:"row", style:"flex-wrap:nowrap" }, HZ.avatar(c, "av"), el("span", { class:"small muted", text:"Zdjęcie profilowe klienta" }),
+        el("button", { class:"ghost small", async onclick(e){ e.currentTarget.disabled = true; const { error } = await HZ.api.setPhoto(c.id, null); if (error){ toast(HZ.dbError(error)); return; } c.photo = null; A.rankRows = null; toast("Usunięto zdjęcie klienta"); render(); refreshRanking().then(render).catch(() => {}); }, text:"Usuń zdjęcie" })) : null,
+      el("p", { class:"small muted", text: c.manual
         ? `Zgody (zebrane przez Ciebie): ranking ${cs.ranking ? "tak" : "nie"}, masa ciała ${cs.health ? "tak" : "nie"}.`
-        : `Zgody klienta: polityka ${HZ.consentOk(c) ? "zaakceptowana" : "jeszcze nie"}, ranking ${cs.ranking ? "tak" : "nie"}, masa ciała ${cs.health ? "tak" : "nie"}.` });
+        : `Zgody klienta: polityka ${HZ.consentOk(c) ? "zaakceptowana" : "jeszcze nie"}, ranking ${cs.ranking ? "tak" : "nie"}, masa ciała ${cs.health ? "tak" : "nie"}.` }));
     const bwIn = el("input", { id:"cl-bw", inputmode:"decimal", placeholder:"kg", value: c.bodyweight ? HZ.fmtKg(c.bodyweight) : "", style:"max-width:6rem;text-align:center" });
     const hcIn = el("input", { id:"cl-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: cs.health || null });
     const rkIn = el("input", { id:"cl-rank", type:"checkbox", style:"width:auto;margin-top:3px", checked: cs.ranking || null,

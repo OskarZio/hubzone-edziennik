@@ -101,7 +101,7 @@ async function syncRanking(){
   if (C.profile.is_admin){ if (C.rankKey !== "admin"){ C.rankKey = "admin"; await HZ.api.deleteRanking(C.session.user.id); } return; }   // trainers are not ranked
   const c = C.profile.consent || {};
   if (!c.ranking){ if (C.rankKey !== "none"){ C.rankKey = "none"; await HZ.api.deleteRanking(C.session.user.id); if (C.rankRows) loadRanking(); } return; }   // ranking only with consent
-  const row = { name:C.profile.name || "", ...HZ.rankFull(C.logs, C.appr, c.health ? C.profile.bodyweight : null, C.profile.birthYear, C.profile.sex), hidden:false };
+  const row = { name:C.profile.name || "", ...(C.profile.photo ? { photo:C.profile.photo } : {}), ...HZ.rankFull(C.logs, C.appr, c.health ? C.profile.bodyweight : null, C.profile.birthYear, C.profile.sex), hidden:false };
   const key = JSON.stringify(row); if (key === C.rankKey) return;
   const { error } = await HZ.api.saveRanking(C.session.user.id, { ...row, updatedAt:new Date().toISOString() });
   if (!error){ C.rankKey = key; if (C.rankRows) loadRanking(); }
@@ -567,9 +567,26 @@ function bwForm(hint){
         if (error){ toast(error.code === "permission-denied" ? "Nie udało się zapisać: trener musi zaktualizować reguły bazy." : HZ.dbError(error)); return; }
         C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; C.profile.birthYear = by; C.profile.sex = sxIn.value || null; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
 }
+/* profile picture (shown on the podium and in the ranking) */
+function photoCard(){
+  const uid = C.session.user.id, me = { name:C.profile.name, photo:C.profile.photo };
+  const save = async photo => { const { error } = await HZ.api.setPhoto(uid, photo); if (error){ toast(HZ.dbError(error)); return; }
+    C.profile.photo = photo || null; if (C.rankRows){ const r = C.rankRows.find(x => x.id === uid); if (r) r.photo = photo || undefined; }
+    syncRanking(); toast(photo ? "Zapisano zdjęcie profilowe" : "Usunięto zdjęcie"); render(); };
+  const file = el("input", { type:"file", accept:"image/*", style:"display:none", async onchange(e){ const f = e.target.files && e.target.files[0]; e.target.value = ""; if (!f) return;
+    try { await save(await HZ.photoFromFile(f)); } catch(err){ toast(err.message || "Nie udało się wczytać zdjęcia"); } } });
+  return el("div", { class:"card photo-card" },
+    el("button", { type:"button", class:"photo-pick", "aria-label":"Zmień zdjęcie profilowe", onclick(){ file.click(); } }, HZ.avatar(me, "av av-xl"), el("span", { class:"photo-edit", "aria-hidden":"true", text:"📷" })),
+    el("div", { class:"stack", style:"gap:6px;min-width:0" },
+      el("h3", { text:"Zdjęcie profilowe" }),
+      el("span", { class:"small muted", text: S.config.rankingEnabled ? "Widać je na podium i w rankingu (jeśli jesteś w rankingu). Bez zdjęcia pokazujemy inicjały." : "Bez zdjęcia pokazujemy inicjały." }),
+      el("div", { class:"row" }, el("button", { type:"button", onclick(){ file.click(); }, text: C.profile.photo ? "Zmień zdjęcie" : "Dodaj zdjęcie" }),
+        C.profile.photo ? el("button", { type:"button", class:"ghost", onclick(){ save(null); }, text:"Usuń" }) : null)),
+    file);
+}
 function accountView(){
   const nameIn = el("input", { id:"acc-name", maxlength:"60", value:(C.profile && C.profile.name) || "" });
-  return [C.profile.guest ? convertCard() : null, el("div", { class:"card" }, el("h2", { text:"Twoje konto" }),
+  return [C.profile.guest ? convertCard() : null, photoCard(), el("div", { class:"card" }, el("h2", { text:"Twoje konto" }),
       el("p", { class:"small muted", text: C.profile.guest ? "Konto gościa (bez e-maila)" : C.session.user.email }),
       S.config.rankingEnabled ? el("label", { class:"row", style:"flex-wrap:nowrap;cursor:pointer" },
         el("input", { id:"rank-show", type:"checkbox", style:"width:auto", checked: (C.profile.consent && C.profile.consent.ranking) || null,
