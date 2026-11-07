@@ -942,7 +942,7 @@ const BOARDS = [
   { key:"progress", label:"Postęp", desc:`Każdy porównywany wyłącznie sam ze sobą: o ile procent wzrosła Twoja siła (ciężar + powtórzenia) średnio w bojach głównych. Ogólny: od pierwszego treningu do najlepszego. Miesięczny: najlepszy wynik w tym miesiącu w porównaniu z najlepszym sprzed miesiąca. Liczy się najwyżej +${HZ.STEP_CAP}% za każdy kolejny trening z ćwiczeniem, więc duży skok na początku (szukanie ciężaru) nie wygrywa. Przy podciąganiu i dipach słabsza guma albo dociążenie też jest postępem. „–” = za mało treningów, żeby porównać (min. 2).` },
 ];
 let rankSort = "points", relEx = null, rankPeriod = "month";
-HZ.rankMonth = () => { rankPeriod = "month"; rankSort = "points"; };
+HZ.rankMonth = (key = "points") => { rankPeriod = "month"; rankSort = key; if (key === "adj") relEx = "main"; };
 const MONTH_KEYS = ["points", "workouts", "progress"];
 /* motivating line for the participant (monthly general board) */
 HZ.myRankMessage = (rows, meId) => {
@@ -958,24 +958,29 @@ HZ.myRankMessage = (rows, meId) => {
   const podium = [...new Set(vis.map(pts))].sort((a,b) => b - a)[2]; const toPod = podium != null ? podium - my : gap;
   return { kind:"go", text:`💪 ${place}. miejsce w tym miesiącu. Do podium brakuje Ci ${toPod} pkt – każdy trening to ${HZ.POINTS.workout} pkt, a seria z rzędu daje bonus.` };
 };
-/* "who rules this month": small banner on the start screen, tap → ranking */
+/* "who rules this month": small banner on the start screen – only the #1 in each category (all of them on a tie), tap → that ranking */
 HZ.monthCrown = (rows, meId, onOpen) => {
-  const k = HZ.monthKey(), pts = r => r.m && r.m.k === k ? (r.m.points || 0) : 0;
-  const vis = (rows || []).filter(r => !r.hidden && pts(r) > 0).sort((a, b) => pts(b) - pts(a) || (a.name || "").localeCompare(b.name || "", "pl"));
+  const k = HZ.monthKey(), mine = r => r.m && r.m.k === k ? r.m : {};
+  const vis = (rows || []).filter(r => !r.hidden);
+  const cats = [
+    { key:"points", ico:"📅", label:"Regularność", val:r => mine(r).points || 0, txt:v => `${v} pkt` },
+    { key:"adj", ico:"💪", label:"Siła", val:r => (r.sc && r.sc.main) || 0, txt:v => `${HZ.fmtKg(v)} pkt` },
+    { key:"progress", ico:"📈", label:"Postęp", val:r => mine(r).progress || 0, txt:v => `+${String(v).replace(".", ",")}%` }
+  ].map(c => { const best = Math.max(0, ...vis.map(c.val)); return { ...c, best, kings: best > 0 ? vis.filter(r => c.val(r) === best).sort((a, b) => (a.name || "").localeCompare(b.name || "", "pl")) : [] }; });
   const mon = HZ.monthName(k).split(" ")[0], Mon = mon[0].toUpperCase() + mon.slice(1);
-  const place = r => 1 + vis.filter(x => pts(x) > pts(r)).length;
-  const top = vis.filter(r => place(r) <= 3).slice(0, 5);
-  const me = vis.find(r => r.id === meId);
-  const attrs = { class:"crown", role:"button", tabindex:"0", "aria-label":"Ranking miesiąca – otwórz", onclick: onOpen || null, onkeydown(e){ if (onOpen && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); onOpen(); } } };
-  if (!top.length) return el("div", attrs, el("span", { class:"crown-ico", text:"👑" }),
-    el("div", { class:"crown-txt" }, el("span", { class:"eyebrow", text:`Ranking · ${mon}` }), el("span", { class:"small", text:`Korona ${mon === "luty" ? "lutego" : "tego miesiąca"} jeszcze wolna – pierwszy trening daje ${HZ.POINTS.workout} pkt.` })));
-  const king = vis.filter(r => place(r) === 1);
-  return el("div", attrs, el("span", { class:"crown-ico", text:"👑" }),
-    el("div", { class:"crown-txt" },
-      el("span", { class:"eyebrow", text:`${Mon} · ${king.length > 1 ? "królują" : "króluje"}` }),
-      el("div", { class:"crown-list" }, top.map(r => el("span", { class:"crown-p" + (r.id === meId ? " me" : "") }, HZ.medal(place(r), true), el("b", { text:r.name || "–" }), el("span", { class:"muted", text:`${pts(r)} pkt` })))),
-      me && place(me) > 3 ? el("span", { class:"small muted", text:`Ty: ${place(me)}. miejsce · ${pts(me)} pkt` }) : null),
-    el("span", { class:"crown-go", "aria-hidden":"true", text:"›" }));
+  const open = key => onOpen ? e => { e.stopPropagation(); onOpen(key); } : null;
+  const live = cats.filter(c => c.kings.length);
+  if (!live.length) return el("div", { class:"crown", role:"button", tabindex:"0", onclick: open("points") }, el("span", { class:"crown-ico", text:"👑" }),
+    el("div", { class:"crown-txt" }, el("span", { class:"eyebrow", text:`${Mon} · korona wolna` }), el("span", { class:"small", text:`Pierwszy trening w tym miesiącu daje ${HZ.POINTS.workout} pkt.` })));
+  return el("div", { class:"crown pod-crown" },
+    el("span", { class:"eyebrow crown-head", text:`👑 ${Mon} · królują` }),
+    el("div", { class:"cpods" }, cats.map(c => { const shown = c.kings.slice(0, 3), more = c.kings.length - shown.length;
+      return el("button", { type:"button", class:"cpod" + (c.kings.length ? "" : " empty"), onclick: open(c.key),
+          "aria-label": c.kings.length ? `${c.label}: ${c.kings.map(r => r.name).join(", ")} – otwórz ranking` : `${c.label}: jeszcze nikt – otwórz ranking` },
+        el("span", { class:"cpod-cat", text:`${c.ico} ${c.label}` }),
+        el("span", { class:"cpod-names" }, c.kings.length ? shown.map(r => el("b", { class: r.id === meId ? "me" : null, text:r.name || "–" })) : el("span", { class:"muted", text:"wolne" }),
+          more > 0 ? el("span", { class:"small muted", text:`+${more}` }) : null),
+        el("span", { class:"cpod-step" }, HZ.medal(1, true), el("span", { text: c.kings.length ? c.txt(c.best) : "–" }))); })));
 };
 HZ.personalMessage = logs => {
   const st = HZ.computeStats(logs); if (!logs.length) return null;

@@ -118,7 +118,7 @@ async function loadRanking(){
 function crown(){
   if (!S.config.rankingEnabled || !C.session) return null;
   if (!C.rankRows){ if (!C.rankLoading){ C.rankLoading = true; loadRanking().finally(() => { C.rankLoading = false; }); } return null; }
-  return HZ.monthCrown(C.rankRows, C.session.user.id, () => { C.tab = "ranking"; HZ.rankMonth(); render(); window.scrollTo(0, 0); });
+  return HZ.monthCrown(C.rankRows, C.session.user.id, key => { C.tab = "ranking"; HZ.rankMonth(key); render(); window.scrollTo(0, 0); });
 }
 function rankingTab(){
   if (!C.rankRows){ loadRanking(); return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
