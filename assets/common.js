@@ -24,7 +24,12 @@ if (HZ.configured && window.firebase){
   auth = firebase.auth(); db = firebase.firestore();
   db.settings({ ignoreUndefinedProperties:true });
   auth.languageCode = "pl";
+  auth.getRedirectResult().catch(e => { HZ.redirectError = e; setTimeout(() => { const m = authMsg(e); if (m) HZ.toast(m); }, 600); });   // Google fallback (redirect) errors
 }
+/* Google sign-in: not inside the Android app's WebView (Google blocks it there) */
+HZ.googleOk = () => !!auth && !/HubzoneApp|; wv\)/.test(navigator.userAgent || "");
+const googleProvider = () => { const p = new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({ prompt:"select_account" }); return p; };
+const googleErr = e => { if (e && e.code === "auth/operation-not-allowed") e.code = "hz/google-off"; return e; };
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
@@ -36,6 +41,19 @@ HZ.api = {
   /* auth */
   onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email || "", guest:!!u.isAnonymous } } : null)); },
   signOut: () => auth.signOut(),
+  googleSignIn: async () => { const p = googleProvider();
+    try { await auth.signInWithPopup(p); }
+    catch(e){ if (["auth/popup-blocked", "auth/operation-not-supported-in-this-environment"].includes(e.code)) return auth.signInWithRedirect(p); throw googleErr(e); } },
+  googleName: () => ((auth && auth.currentUser && auth.currentUser.displayName) || "").trim().split(/\s+/)[0].slice(0, 60),
+  /* guest → account with Google (same uid, results stay) */
+  linkGoogle: uid => wrap(async () => {
+    const u = auth.currentUser; if (!u || u.uid !== uid || !u.isAnonymous) throw { code:"auth/no-current-user" };
+    let r; try { r = await u.linkWithPopup(googleProvider()); } catch(e){ throw googleErr(e); }
+    await r.user.getIdToken(true);
+    const email = r.user.email || ((r.user.providerData || []).find(x => x.providerId === "google.com") || {}).email || "";
+    await db.doc("users/" + uid).update({ email, guest:false, convertedAt:new Date().toISOString() });
+    return email;
+  }),
   /* profiles */
   profile: uid => wrap(async () => { const s = await db.doc("users/" + uid).get(); return s.exists ? asProfile(uid, s.data()) : null; }),
   createProfile: (uid, { name, email, joinCode, consent, guest }) => wrap(() => db.doc("users/" + uid).set({ name, email, isAdmin:false, joinCode, createdAt:new Date().toISOString(), consent, ...(guest ? { guest:true } : {}) })),
@@ -924,6 +942,7 @@ const BOARDS = [
   { key:"progress", label:"Postęp", desc:`Każdy porównywany wyłącznie sam ze sobą: o ile procent wzrosła Twoja siła (ciężar + powtórzenia) średnio w bojach głównych. Ogólny: od pierwszego treningu do najlepszego. Miesięczny: najlepszy wynik w tym miesiącu w porównaniu z najlepszym sprzed miesiąca. Liczy się najwyżej +${HZ.STEP_CAP}% za każdy kolejny trening z ćwiczeniem, więc duży skok na początku (szukanie ciężaru) nie wygrywa. Przy podciąganiu i dipach słabsza guma albo dociążenie też jest postępem. „–” = za mało treningów, żeby porównać (min. 2).` },
 ];
 let rankSort = "points", relEx = null, rankPeriod = "month";
+HZ.rankMonth = () => { rankPeriod = "month"; rankSort = "points"; };
 const MONTH_KEYS = ["points", "workouts", "progress"];
 /* motivating line for the participant (monthly general board) */
 HZ.myRankMessage = (rows, meId) => {
@@ -938,6 +957,25 @@ HZ.myRankMessage = (rows, meId) => {
   if (place <= 3) return { kind:"p" + place, text:`${place === 2 ? "🥈" : "🥉"} Jesteś na podium – ${place}. miejsce! Do miejsca wyżej brakuje Ci ${gap} pkt${gap <= HZ.POINTS.workout ? " – to jeden trening" : ""}.` };
   const podium = [...new Set(vis.map(pts))].sort((a,b) => b - a)[2]; const toPod = podium != null ? podium - my : gap;
   return { kind:"go", text:`💪 ${place}. miejsce w tym miesiącu. Do podium brakuje Ci ${toPod} pkt – każdy trening to ${HZ.POINTS.workout} pkt, a seria z rzędu daje bonus.` };
+};
+/* "who rules this month": small banner on the start screen, tap → ranking */
+HZ.monthCrown = (rows, meId, onOpen) => {
+  const k = HZ.monthKey(), pts = r => r.m && r.m.k === k ? (r.m.points || 0) : 0;
+  const vis = (rows || []).filter(r => !r.hidden && pts(r) > 0).sort((a, b) => pts(b) - pts(a) || (a.name || "").localeCompare(b.name || "", "pl"));
+  const mon = HZ.monthName(k).split(" ")[0], Mon = mon[0].toUpperCase() + mon.slice(1);
+  const place = r => 1 + vis.filter(x => pts(x) > pts(r)).length;
+  const top = vis.filter(r => place(r) <= 3).slice(0, 5);
+  const me = vis.find(r => r.id === meId);
+  const attrs = { class:"crown", role:"button", tabindex:"0", "aria-label":"Ranking miesiąca – otwórz", onclick: onOpen || null, onkeydown(e){ if (onOpen && (e.key === "Enter" || e.key === " ")){ e.preventDefault(); onOpen(); } } };
+  if (!top.length) return el("div", attrs, el("span", { class:"crown-ico", text:"👑" }),
+    el("div", { class:"crown-txt" }, el("span", { class:"eyebrow", text:`Ranking · ${mon}` }), el("span", { class:"small", text:`Korona ${mon === "luty" ? "lutego" : "tego miesiąca"} jeszcze wolna – pierwszy trening daje ${HZ.POINTS.workout} pkt.` })));
+  const king = vis.filter(r => place(r) === 1);
+  return el("div", attrs, el("span", { class:"crown-ico", text:"👑" }),
+    el("div", { class:"crown-txt" },
+      el("span", { class:"eyebrow", text:`${Mon} · ${king.length > 1 ? "królują" : "króluje"}` }),
+      el("div", { class:"crown-list" }, top.map(r => el("span", { class:"crown-p" + (r.id === meId ? " me" : "") }, HZ.medal(place(r), true), el("b", { text:r.name || "–" }), el("span", { class:"muted", text:`${pts(r)} pkt` })))),
+      me && place(me) > 3 ? el("span", { class:"small muted", text:`Ty: ${place(me)}. miejsce · ${pts(me)} pkt` }) : null),
+    el("span", { class:"crown-go", "aria-hidden":"true", text:"›" }));
 };
 HZ.personalMessage = logs => {
   const st = HZ.computeStats(logs); if (!logs.length) return null;
@@ -1088,10 +1126,21 @@ function authMsg(err){
   if (c === "auth/operation-not-allowed") return "Logowanie e-mailem nie jest włączone w Firebase (Authentication → Sign-in method).";
   if (c === "auth/admin-restricted-operation") return "Wejście jako gość nie jest jeszcze włączone. Trener musi włączyć „Anonymous” w Firebase → Authentication → Sign-in method.";
   if (c === "auth/credential-already-in-use" || c === "auth/provider-already-linked") return "Ten e-mail ma już konto. Użyj innego adresu albo poproś trenera o pomoc.";
+  if (c === "auth/popup-closed-by-user" || c === "auth/cancelled-popup-request" || c === "auth/user-cancelled") return "";
+  if (c === "auth/account-exists-with-different-credential") return "Ten e-mail ma już konto z hasłem. Zaloguj się e-mailem i hasłem.";
+  if (c === "hz/google-off") return "Logowanie przez Google nie jest jeszcze włączone. Trener musi je włączyć w Firebase (Authentication → Sign-in method → Google).";
+  if (c === "auth/unauthorized-domain") return "Ta strona nie jest jeszcze dopuszczona do logowania Google. Trener: uruchom skrypt u.py.";
+  if (c === "auth/popup-blocked") return "Przeglądarka zablokowała okno Google. Zezwól na wyskakujące okna i spróbuj ponownie.";
   if (c === "hz/join-code") return "Nieprawidłowy kod klubu. Zapytaj trenera o aktualny kod.";
   return "Coś poszło nie tak. Spróbuj ponownie.";
 }
 HZ.authMsg = authMsg;
+HZ.googleIcon = () => { const NS = "http://www.w3.org/2000/svg", s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 48 48"); s.setAttribute("width", "20"); s.setAttribute("height", "20"); s.setAttribute("aria-hidden", "true");
+  [["#EA4335","M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"],
+   ["#4285F4","M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"],
+   ["#FBBC05","M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"],
+   ["#34A853","M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"]]
+   .forEach(([f, d]) => { const p = document.createElementNS(NS, "path"); p.setAttribute("fill", f); p.setAttribute("d", d); s.append(p); }); return s; };
 /* password policy for new passwords */
 const COMMON = ["password","haslo","hasło","qwerty","12345678","123456789","1234567890","11111111","zaq12wsx","polska","iloveyou","admin123","password1","qwerty123","abc12345","hubzone","trening1"];
 HZ.passwordProblem = (pass, email) => {
@@ -1125,6 +1174,12 @@ HZ.authView = ({ mode, allowRegister, onMode, title, sub }) => {
   const rankIn = el("input", { id:"au-rank", type:"checkbox", style:"width:auto;margin-top:3px" });
   const nameIn = el("input", { id:"au-name", autocomplete:"given-name", maxlength:"60", placeholder:"np. Kasia" });
   const codeIn = el("input", { id:"au-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase", value:HZ.inviteCode });
+  if (mode !== "forgot" && HZ.googleOk()){
+    const g = el("button", { type:"button", class:"google-btn", async onclick(){ msg.textContent = ""; g.disabled = true;
+      try { await HZ.api.googleSignIn(); } catch(e){ msg.textContent = authMsg(e); } g.disabled = false; } },
+      HZ.googleIcon(), el("span", { text:"Kontynuuj z Google" }));
+    form.append(g, el("div", { class:"or-line" }, el("span", { text:"albo e-mailem" })));
+  }
   if (mode === "register") form.append(el("label", { class:"f" }, "Imię", nameIn));
   form.append(el("label", { class:"f" }, "E-mail", emailIn));
   if (mode !== "forgot") form.append(el("label", { class:"f" }, mode === "register" ? `Hasło (min. ${HZ.MIN_PASSWORD} znaków, litera i cyfra)` : "Hasło", passIn));

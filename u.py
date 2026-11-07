@@ -1,6 +1,6 @@
 # Hubzone e-Dziennik: ustawienie Firebase z Google Cloud Shell (bez wklejania).
 # Uruchom w Cloud Shell:  curl -sL oskarzio.github.io/hubzone-edziennik/u.py | python3
-# Robi: 1) włącza wejście jako gość (Anonymous) i ochronę przed sprawdzaniem e-maili,
+# Robi: 1) włącza wejście jako gość (Anonymous) i ochronę przed sprawdzaniem e-maili, dopuszcza logowanie Google na stronie,
 #       2) wgrywa aktualne reguły bazy (firestore.rules), 3) pokazuje region bazy.
 import json, subprocess, sys, urllib.request, urllib.error
 
@@ -31,6 +31,15 @@ r = call("PATCH", f"https://identitytoolkit.googleapis.com/admin/v2/projects/{P}
 ok1 = bool(r and r.get("signIn", {}).get("anonymous", {}).get("enabled"))
 print("   OK – gość włączony" if ok1 else "   Nie udało się (zrób to ręcznie: Authentication → Sign-in method → Anonymous)")
 
+print("   Logowanie przez Google: dopuszczam stronę oskarzio.github.io...")
+cfg = call("GET", f"https://identitytoolkit.googleapis.com/admin/v2/projects/{P}/config") or {}
+doms = cfg.get("authorizedDomains", [])
+if "oskarzio.github.io" not in doms:
+    call("PATCH", f"https://identitytoolkit.googleapis.com/admin/v2/projects/{P}/config?updateMask=authorizedDomains", {"authorizedDomains": doms + ["oskarzio.github.io"]})
+g = call("GET", f"https://identitytoolkit.googleapis.com/admin/v2/projects/{P}/defaultSupportedIdpConfigs/google.com")
+gOn = bool(g and g.get("enabled"))
+print("   OK – Google włączony" if gOn else "   Google jeszcze NIE jest włączony: Firebase → Authentication → Sign-in method → Dodaj dostawcę → Google → Włącz → Zapisz")
+
 print("2/3 Wgrywam reguły bazy...")
 ok2 = False
 try:
@@ -53,4 +62,4 @@ loc = (r or {}).get("locationId", "?")
 eu = loc.startswith("eur") or loc.startswith("europe")
 print(f"   Region: {loc} –", "Europa, OK" if eu else "UWAGA: to nie jest Europa, napisz do Claude")
 
-print("\nGOTOWE" if ok1 and ok2 else "\nCzęść kroków się nie udała – zrób zrzut ekranu i wyślij go Claude.")
+print("\nGOTOWE" + ("" if gOn else " (zostało tylko włączyć Google w Firebase, patrz wyżej)") if ok1 and ok2 else "\nCzęść kroków się nie udała – zrób zrzut ekranu i wyślij go Claude.")

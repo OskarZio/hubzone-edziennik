@@ -21,7 +21,7 @@ async function loadAll(){
     if (!A.profile || !A.profile.is_admin){ render(); return; }
     await Promise.all([HZ.loadConfig(), HZ.loadWorkouts(), loadClients(), loadSettings()]);
     Promise.all((A.admins || []).map(x => HZ.api.deleteRanking(x.id))).catch(() => {});   // trainers never appear in the ranking
-    if (S.config.rankingEnabled !== false) refreshRanking().catch(() => {});   // keep everybody's ranking row fresh as soon as the trainer logs in
+    if (S.config.rankingEnabled !== false) refreshRanking().then(render).catch(() => {});   // keep everybody's ranking row fresh as soon as the trainer logs in
     A.error = null;
   } catch(e){ console.error(e); A.error = "Nie udało się wczytać danych. Sprawdź połączenie i odśwież stronę."; A.checked = true; }
   render();
@@ -248,7 +248,8 @@ function workoutsView(){
   const allWs = HZ.sortedWorkouts().reverse();
   const ws = HZ.groupsOn() && A.group ? allWs.filter(w => (w.group || "") === A.group) : allWs;
   const nextFri = (() => { const d = new Date(); d.setDate(d.getDate() + (5 - d.getDay() + 7) % 7); return d.toLocaleDateString("sv-SE"); })();
-  const out = [el("div", { class:"row between" }, el("h2", { text:"Treningi" }), el("button", { class:"primary", onclick(){
+  const out = [A.rankRows && S.config.rankingEnabled !== false ? HZ.monthCrown(A.rankRows, null, () => { A.tab = "ranking"; HZ.rankMonth(); HZ.LS.set("hz-admin-tab", "ranking"); render(); window.scrollTo(0, 0); }) : null,
+    el("div", { class:"row between" }, el("h2", { text:"Treningi" }), el("button", { class:"primary", onclick(){
     const last = HZ.sortedWorkouts().slice(-1)[0];
     A.editW = { id:null, date:nextFri, title:"", note:"", stations: last ? HZ.clone(last.stations || []).map(s => ({ ...s, id:HZ.uuid() })) : [newStation("main"), newStation("acc")] };
     if (HZ.groupsOn()) A.editW.group = A.group || (last && last.group) || S.config.groups[0].id;

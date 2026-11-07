@@ -114,6 +114,12 @@ async function loadRanking(){
   const { data, error } = await HZ.api.ranking();
   C.rankRows = error ? [] : data; if (error) toast(HZ.dbError(error)); render();
 }
+/* this month's leaders on the start screen – visible on every class, tap opens the ranking */
+function crown(){
+  if (!S.config.rankingEnabled || !C.session) return null;
+  if (!C.rankRows){ if (!C.rankLoading){ C.rankLoading = true; loadRanking().finally(() => { C.rankLoading = false; }); } return null; }
+  return HZ.monthCrown(C.rankRows, C.session.user.id, () => { C.tab = "ranking"; HZ.rankMonth(); render(); window.scrollTo(0, 0); });
+}
 function rankingTab(){
   if (!C.rankRows){ loadRanking(); return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
   const prompt = C.profile && C.profile.bodyweight && C.profile.sex ? null : bwForm("Wpisz swoją masę ciała, żeby pojawić się w rankingu siły względnej. Inni zobaczą tylko procenty.");
@@ -124,7 +130,7 @@ function body(){
   if (C.tab === "progress") return C.logs.length ? [HZ.progressLegend(), HZ.personalStats(C.logs, "Twoje statystyki", C.appr), ...HZ.progressView(C.logs, "Twoje postępy", "me", render)] : HZ.progressView(C.logs, "Twoje postępy", "me", render);
   if (C.tab === "own" && S.config.ownEnabled) return ownView();
   if (C.tab === "account") return accountView();
-  return todayView();
+  return [crown(), ...todayView()];
 }
 /* only today's training (in the chosen group); older ones open from "Do uzupełnienia" */
 const myGroup = () => HZ.groupsOn() ? (C.group !== undefined ? C.group : (C.group = HZ.LS.get("hz-group") || null)) : null;
@@ -613,7 +619,7 @@ function privacyCard(){
 
 /* ---------- account without profile (e.g. registration interrupted) ---------- */
 function joinCard(){
-  const nameIn = el("input", { id:"jn-name", maxlength:"60", placeholder:"np. Kasia" });
+  const nameIn = el("input", { id:"jn-name", maxlength:"60", placeholder:"np. Kasia", value:HZ.api.googleName() });
   const codeIn = el("input", { id:"jn-code", autocomplete:"off", placeholder:"kod od trenera", style:"text-transform:uppercase", value:HZ.inviteCode });
   return el("div", { class:"card auth" }, el("h2", { text:"Dokończ zakładanie konta" }),
     el("p", { class:"small muted", text:`Zalogowano jako ${C.session.user.email}. Podaj imię i kod klubu od trenera.` }),
@@ -760,6 +766,12 @@ function convertCard(){
     HZ.LS.set("hz-email", email); toast("Gotowe! Masz konto, wszystkie wyniki zostały."); render(); });
   return el("div", { class:"card", style:"border-color:var(--accent)" }, el("h2", { text:"Załóż konto" }),
     el("p", { class:"small", text:`Twoje ${C.logs.length} ${HZ.plural(C.logs.length, "trening", "treningi", "treningów")} i rekordy zostaną. Potem zalogujesz się e-mailem na dowolnym telefonie.` }),
+    HZ.googleOk() ? el("button", { type:"button", class:"google-btn", async onclick(e){ msg.textContent = ""; const b = e.currentTarget; b.disabled = true;
+      const { data:email, error } = await HZ.api.linkGoogle(C.session.user.id); b.disabled = false;
+      if (error){ msg.textContent = HZ.authMsg(error) || (error.code ? HZ.dbError(error) : ""); return; }
+      C.session.user.email = email; C.session.user.guest = false; C.profile.email = email; C.profile.guest = false;
+      toast("Gotowe! Konto połączone z Google, wszystkie wyniki zostały."); render(); } }, HZ.googleIcon(), el("span", { text:"Połącz z Google" })) : null,
+    HZ.googleOk() ? el("div", { class:"or-line" }, el("span", { text:"albo e-mail i hasło" })) : null,
     el("label", { class:"f" }, "E-mail", emailIn), el("label", { class:"f" }, `Hasło (min. ${HZ.MIN_PASSWORD} znaków, litera i cyfra)`, passIn), msg, btn);
 }
 /* guests lose access after signing out, so ask first */
