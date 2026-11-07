@@ -68,14 +68,14 @@ HZ.api = {
     const u = auth.currentUser; if (!u || u.uid !== uid) throw { code:"auth/no-current-user" };
     if (!u.isAnonymous) await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
     await delWhere("user_id", uid);
-    for (const d of (await db.collection("drafts").where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {});
+    for (const c of ["drafts", "ideas"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {});
     await db.doc("ranking/" + uid).delete().catch(() => {});
     await db.doc("users/" + uid).delete();
     await u.delete().catch(e => { if (!u.isAnonymous) throw e; return auth.signOut(); });
   }),
   deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid);
     await db.doc("plans/" + uid).delete().catch(() => {});
-    for (const c of ["drafts", "approvals", "technique"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
+    for (const c of ["drafts", "approvals", "technique", "ideas"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
   updateProfile: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
   users: () => wrap(async () => (await db.collection("users").get()).docs.map(d => asProfile(d.id, d.data()))),
@@ -118,6 +118,9 @@ HZ.api = {
   draftsForWorkout: wid => wrap(async () => list(await db.collection("drafts").where("workout_id", "==", wid).get())),
   /* attendance: clients marked absent for a training (trainer only) */
   getAbsent: wid => wrap(async () => { const d = await db.doc("attendance/" + wid).get(); return d.exists ? (d.data().absent || []) : []; }),
+  sendIdea: (uid, name, text) => wrap(() => db.collection("ideas").add({ user_id:uid, name:(name || "").slice(0, 60), text, at:new Date().toISOString() })),
+  ideas: () => wrap(async () => list(await db.collection("ideas").get()).sort((a, b) => (b.at || "").localeCompare(a.at || ""))),
+  deleteIdea: id => wrap(() => db.doc("ideas/" + id).delete()),
   setAbsent: (wid, absent) => wrap(() => db.doc("attendance/" + wid).set({ absent, at:new Date().toISOString() })),
   saveGroups: groups => wrap(() => db.doc("config/library").set({ groups }, { merge:true })),
   /* trainer's plan for the next training: weight and reps per exercise */

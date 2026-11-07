@@ -170,6 +170,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Pomysły na aplikację: klient wysyła (i może usunąć) swoje, trener czyta wszystkie.
+    match /ideas/{id} {
+      allow read, delete: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow create: if isMember() && request.resource.data.user_id == request.auth.uid
+        && request.resource.data.keys().hasOnly(['user_id', 'name', 'text', 'at'])
+        && request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60 && request.resource.data.at is string;
+    }
+
     // Ocena techniki: tylko trener.
     match /technique/{id} {
       allow read, write: if isAdmin();

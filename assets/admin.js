@@ -104,6 +104,20 @@ function setupEmpty(){
 }
 
 /* ---------- settings: exercises, bands, join code ---------- */
+/* client ideas for the app */
+function ideasCard(){
+  if (A.ideas === undefined){ A.ideas = null; HZ.api.ideas().then(r => { A.ideas = r.error ? [] : r.data; render(); }); }
+  const list = A.ideas || [];
+  return el("div", { class:"card" }, el("h2", { text: `💡 Pomysły od klientów${list.length ? ` (${list.length})` : ""}` }),
+    el("p", { class:"small muted", text:"Co poprawić w aplikacji i jakie funkcje dodać – wysłane spod feedbacku po treningu." }),
+    A.ideas === null ? el("p", { class:"small muted", text:"Wczytuję…" }) : !list.length ? el("p", { class:"small muted", text:"Na razie brak pomysłów." }) :
+    el("div", { class:"list" }, list.map(i => el("div", { class:"stack idea-item" },
+      el("div", { class:"row", style:"justify-content:space-between;flex-wrap:nowrap" },
+        el("b", { text:(i.name || "Klient") + " · " + HZ.fmtDate((i.at || "").slice(0, 10)) }),
+        el("button", { class:"ghost small", async onclick(e){ e.currentTarget.disabled = true; const r = await HZ.api.deleteIdea(i.id); if (r && r.error) return HZ.toast("Nie udało się usunąć"); A.ideas = A.ideas.filter(x => x.id !== i.id); render(); }, text:"Usuń" })),
+      el("span", { style:"white-space:pre-wrap", text:i.text })))),
+    el("button", { class:"ghost", onclick(){ A.ideas = undefined; render(); }, text:"Odśwież" }));
+}
 function settingsView(){
   if (!A.editC) A.editC = HZ.clone(S.config);
   const c = A.editC;
@@ -200,7 +214,7 @@ function settingsView(){
   const guideCard = el("div", { class:"card" }, el("h2", { text:"Instrukcja dla klientów" }),
     el("p", { class:"small muted", text:"Każdy klient widzi ją raz przy pierwszym wejściu: 1) klauzula RODO i wybór widoczności w rankingu, 2) jak wpisywać trening, 3) postępy, ranking i konto. Klient może ją otworzyć ponownie w Konto." }),
     el("a", { class:"btn primary", style:"align-self:flex-start", href:"./?podglad=instrukcja", text:"👁 Podgląd instrukcji" }));
-  return [HZ.installCard(render, { title:"Panel trenera jako aplikacja" }), guideCard, exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
+  return [HZ.installCard(render, { title:"Panel trenera jako aplikacja" }), ideasCard(), guideCard, exCard, bandCard, save, HZ.progressLegend(), featCard(), codeCard, guestCard, ownCard, rankCard, HZ.themeCard(render)];
 }
 /* exercise categories (e.g. Weightlifting, Handstand): sorted lists, every exercise still available everywhere */
 const exCats = list => [...new Set(list.map(e => (e.cat || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "pl"));

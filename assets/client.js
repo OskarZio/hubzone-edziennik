@@ -169,6 +169,22 @@ function noTraining(){
     S.config.ownEnabled ? el("button", { onclick(){ C.tab = "own"; render(); }, text:"Zapisz trening własny" }) : null);
 }
 
+/* ---------- app ideas: what to improve / which features to add (separate from workout feedback) ---------- */
+function ideaCard(){
+  if (!C.ideaOpen) return el("button", { class:"ghost idea-btn", onclick(){ C.ideaOpen = true; render(); setTimeout(() => { const t = document.getElementById("idea-text"); if (t) t.focus(); }, 50); },
+    text:"💡 Co poprawić w aplikacji albo jaką funkcję dodać?" });
+  const ta = el("textarea", { id:"idea-text", maxlength:"1000", rows:"3", placeholder:"Np. coś nie działa, coś jest niewygodne, przydałaby się opcja…", value:C.ideaText || "", oninput(e){ C.ideaText = e.target.value; } });
+  return el("div", { class:"card idea" },
+    el("div", { class:"stack", style:"gap:2px" }, el("h3", { text:"💡 Pomysł na aplikację" }), el("span", { class:"small muted", text:"Trafia prosto do trenera. Możesz wysłać ile chcesz." })),
+    ta,
+    el("div", { class:"row" },
+      el("button", { class:"primary", async onclick(e){ const txt = (C.ideaText || "").trim(); if (!txt) return HZ.toast("Wpisz, co poprawić albo dodać");
+        const b = e.currentTarget; b.disabled = true; const r = await HZ.api.sendIdea(C.session.user.id, C.profile && C.profile.name, txt); b.disabled = false;
+        if (r && r.error) return HZ.toast("Nie udało się wysłać – spróbuj ponownie");
+        C.ideaText = ""; C.ideaOpen = false; HZ.toast("Dzięki! Pomysł wysłany do trenera 🙌"); render(); }, text:"Wyślij pomysł" }),
+      el("button", { class:"ghost", onclick(){ C.ideaOpen = false; render(); }, text:"Anuluj" })));
+}
+
 /* ---------- today ---------- */
 const DRAFT_V = 3;   // bump when warm-up rules change: untouched warm-ups in old drafts get recalculated
 function draftFor(w){
@@ -236,6 +252,7 @@ function todayView(){
     HZ.feat("pain", C.profile) ? painBox(d) : null,
     el("label", { class:"f" }, "Notatka do trenera / feedback (opcjonalnie)", el("textarea", { id:"note-" + w.id, maxlength:"1000", value:d.note, oninput(e){ d.note = e.target.value; saveDrafts(); } })),
     el("button", { class:"primary", onclick(e){ saveWorkout(w, d, e.currentTarget); }, text: saved ? "Zapisz zmiany" : "Wyślij wyniki do trenera" })));
+  out.push(ideaCard());
   if (!C.sel || w.date === HZ.todayISO()) out.push(finishCard());
   return out;
 }
