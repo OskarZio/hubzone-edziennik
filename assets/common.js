@@ -972,15 +972,19 @@ HZ.monthCrown = (rows, meId, onOpen) => {
   const live = cats.filter(c => c.kings.length);
   if (!live.length) return el("div", { class:"crown", role:"button", tabindex:"0", onclick: open("points") }, el("span", { class:"crown-ico", text:"👑" }),
     el("div", { class:"crown-txt" }, el("span", { class:"eyebrow", text:`${Mon} · korona wolna` }), el("span", { class:"small", text:`Pierwszy trening w tym miesiącu daje ${HZ.POINTS.workout} pkt.` })));
+  const initials = n => (n || "?").trim().split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const HUES = [8, 28, 145, 175, 205, 230, 275, 320, 95, 350];
+  const hue = n => HUES[[...(n || "")].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7) % HUES.length];
+  const who = ks => ks.length === 1 ? ks[0].name : ks.length === 2 ? `${ks[0].name} & ${ks[1].name}` : `${ks[0].name} +${ks.length - 1}`;
   return el("div", { class:"crown pod-crown" },
     el("span", { class:"eyebrow crown-head", text:`👑 ${Mon} · królują` }),
-    el("div", { class:"cpods" }, cats.map(c => { const shown = c.kings.slice(0, 3), more = c.kings.length - shown.length;
-      return el("button", { type:"button", class:"cpod" + (c.kings.length ? "" : " empty"), onclick: open(c.key),
-          "aria-label": c.kings.length ? `${c.label}: ${c.kings.map(r => r.name).join(", ")} – otwórz ranking` : `${c.label}: jeszcze nikt – otwórz ranking` },
-        el("span", { class:"cpod-cat", text:`${c.ico} ${c.label}` }),
-        el("span", { class:"cpod-names" }, c.kings.length ? shown.map(r => el("b", { class: r.id === meId ? "me" : null, text:r.name || "–" })) : el("span", { class:"muted", text:"wolne" }),
-          more > 0 ? el("span", { class:"small muted", text:`+${more}` }) : null),
-        el("span", { class:"cpod-step" }, HZ.medal(1, true), el("span", { text: c.kings.length ? c.txt(c.best) : "–" }))); })));
+    el("div", { class:"cpods" }, cats.map(c => { const ks = c.kings, shown = ks.slice(0, 3);
+      return el("button", { type:"button", class:"cpod" + (ks.length ? "" : " empty"), onclick: open(c.key),
+          "aria-label": ks.length ? `${c.label}: ${ks.map(r => r.name).join(", ")} – otwórz ranking` : `${c.label}: jeszcze nikt – otwórz ranking` },
+        el("span", { class:"cpod-avs" }, ks.length ? shown.map(r => el("span", { class:"cpod-av" + (r.id === meId ? " me" : ""), style:`--h:${hue(r.name)}`, title:r.name || "", text:initials(r.name) }))
+          : el("span", { class:"cpod-av none", text:"?" })),
+        el("span", { class:"cpod-who" + (ks.some(r => r.id === meId) ? " me" : ""), text: ks.length ? who(ks) : "wolne" }),
+        el("span", { class:"cpod-step" }, el("span", { class:"cpod-val", text: ks.length ? c.txt(c.best) : "–" }), el("span", { class:"cpod-cat", text:`${c.ico} ${c.label}` }))); })));
 };
 HZ.personalMessage = logs => {
   const st = HZ.computeStats(logs); if (!logs.length) return null;
