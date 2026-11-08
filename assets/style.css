@@ -1,11 +1,13 @@
+@font-face{font-family:"Barlow Condensed";font-weight:600;font-style:normal;font-display:swap;src:url(fonts/barlow-condensed-semibold.woff) format("woff")}
+@font-face{font-family:"Barlow Condensed";font-weight:700;font-style:normal;font-display:swap;src:url(fonts/barlow-condensed-bold.woff) format("woff")}
 /* Hubzone Weightlifting e-Dziennik
    Layout: one narrow column, like a station card held in the hand. */
 :root{
   --bg:#ECEFF1; --surface:#FFFFFF; --sunk:#F5F7F8; --ink:#14202A; --muted:#5A6873; --line:#D3DADF;
   --accent:#D9480F; --accent-ink:#FFFFFF; --accent-soft:#FBE3D6;
   --good:#2B8A3E; --good-soft:#DDF3E2; --hold:#3B5BA9; --hold-soft:#E0E7F7; --bad:#C92A2A; --bad-soft:#F9E0E0;
-  /* system fonts only: no requests to Google Fonts, so no visitor IP is sent to third parties */
-  --display:"Avenir Next Condensed","Roboto Condensed","Arial Narrow","Helvetica Neue",system-ui,sans-serif;
+  /* fonts served from this site (assets/fonts, SIL OFL): no requests to Google Fonts, so no visitor IP goes to third parties */
+  --display:"Barlow Condensed","Avenir Next Condensed","Roboto Condensed","Arial Narrow",system-ui,sans-serif;
   --body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --r:10px;
   color-scheme:light;
@@ -434,3 +436,79 @@ button.google-btn:hover{background:#f7f8f8}
 button.photo-pick{all:unset;position:relative;cursor:pointer;border-radius:50%;flex:none}
 button.photo-pick:focus-visible{outline:2px solid var(--accent,#d9480f);outline-offset:3px}
 .photo-edit{position:absolute;right:-2px;bottom:-2px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:.85rem;background:var(--card,#fff);box-shadow:0 1px 4px rgba(0,0,0,.25)}
+
+/* =====================================================================
+   UX refresh (Nov 2026): condensed scoreboard type, compact section bar on phones,
+   wider trainer panel on desktop, calmer station cards
+   ===================================================================== */
+h1{font-size:2.3rem;letter-spacing:0;line-height:.95}
+h2{font-size:1.55rem;letter-spacing:.005em}
+h3{font-size:1.25rem}
+.brand .bt b{letter-spacing:.04em}
+.badge{font-weight:700;letter-spacing:.02em}
+.view{display:flex;flex-direction:column;gap:14px;min-width:0}
+
+/* keyboard focus everywhere, never just colour */
+:where(button,a,input,select,textarea,summary,[role=button]):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* ---- section bar ---- */
+.tabs button{display:inline-flex;align-items:center;justify-content:center;gap:7px;position:relative;transition:background .15s,color .15s}
+.tab-ic{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tab-s{display:none}
+.tab-badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font:700 .7rem/18px var(--body);text-align:center}
+@media (min-width:760px){
+  .tabs{position:sticky;top:8px;z-index:20;background:color-mix(in srgb,var(--sunk) 88%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);box-shadow:0 6px 16px -12px rgba(0,0,0,.35)}
+  .tabs button[aria-pressed="true"] .tab-ic{color:var(--accent)}
+}
+@media (max-width:759px){
+  /* phones: the bar stays at the top; short names and small icons so every section fits (no hidden "Konto") */
+  .tabs{position:sticky;top:6px;z-index:20;overflow:visible;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:2px;border-radius:16px;
+    background:color-mix(in srgb,var(--sunk) 90%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+  .tabs button{flex-direction:column;gap:2px;min-width:0;min-height:48px;padding:5px 2px;border-radius:12px;font:600 .72rem/1.1 var(--body)}
+  .tabs button[aria-pressed="true"] .tab-ic{color:var(--accent)}
+  .tab-ic{width:20px;height:20px}
+  .tab-l{display:none} .tab-s{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  .tab-badge{position:absolute;top:2px;left:calc(50% + 6px)}
+}
+
+/* ---- trainer panel: use the width of a computer screen ---- */
+@media (min-width:1000px){
+  body.admin .wrap{max-width:1120px}
+  body.admin .view.v-settings,body.admin .view.v-clients{display:block;columns:2 480px;column-gap:14px}
+  body.admin .view.v-settings > *,body.admin .view.v-clients > *{break-inside:avoid;margin:0 0 14px;width:100%}
+  body.admin .view.v-settings > :is(h2,h3,.row,.notice),body.admin .view.v-clients > :is(h2,h3,.row,.notice){column-span:all}
+}
+@media (min-width:760px){ body:not(.admin) .wrap{max-width:760px} }
+
+/* ---- suggestion box: short by default ---- */
+.tip-wrap{display:block}
+.tip-txt.clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+button.tip-more{padding:0;margin-top:2px;font-weight:600;color:inherit;text-decoration:underline;text-underline-offset:3px;opacity:.85}
+details.jump > summary,details.calc-change > summary{cursor:pointer;width:max-content;font-weight:600;color:var(--muted);list-style:none;padding:4px 0}
+details.jump > summary::-webkit-details-marker,details.calc-change > summary::-webkit-details-marker{display:none}
+details.jump > summary::before,details.calc-change > summary::before{content:"+ ";font-weight:700}
+details[open].jump > summary::before,details[open].calc-change > summary::before{content:"– "}
+
+/* ---- warm-up ready: a chain of sets instead of a form ---- */
+.target.calc.ready{border:1px solid var(--line);background:var(--sunk);gap:6px}
+.target.calc.ready.auto{border-color:color-mix(in srgb,var(--good) 45%,transparent);background:var(--good-soft)}
+.calc-src{font-weight:700;color:var(--good)}
+.target.calc.ready:not(.auto) .calc-src{color:var(--ink)}
+.calc-chain{list-style:none;margin:0;padding:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:stretch;gap:16px;max-width:440px}
+.calc-chain li{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;padding:5px 6px;border-radius:10px;background:var(--surface);border:1px solid var(--line);text-align:center}
+.calc-chain li + li::before{content:"›";position:absolute;left:-14px;top:50%;transform:translateY(-55%);font:700 1.2rem var(--display);color:var(--muted)}
+.calc-chain li.work{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.cc-n{font-size:.7rem;font-weight:600;opacity:.75;line-height:1.1}
+.cc-v{font:700 1.2rem/1.05 var(--display);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.target.calc .link{white-space:nowrap}
+.tip.first .ic{display:none}
+
+/* ---- numbers read like a scoreboard ---- */
+.stat b,.stats b,.podium b,.cpod-val{font-family:var(--display)}
+.set input,.set select{font-size:1.4rem;font-weight:700}
+.set select{font-size:1.15rem}
+.set input::placeholder{font-weight:600;font-size:1.1rem}
+.set .n{font-size:1.5rem}
+.badge{font-size:1.1rem}
+.cpods{max-width:640px;margin:0 auto;width:100%}

@@ -476,8 +476,29 @@ HZ.kindOf = ex => ex && (ex.kind === "heavy" || ex.kind === "light") ? ex.kind :
 HZ.kindDot = ex => HZ.kindOf(ex) ? el("span", { class:"kdot " + HZ.kindOf(ex), title: HZ.kindOf(ex) === "heavy" ? "Ciężkie ćwiczenie – małe skoki" : "Większe skoki ciężaru" }) : null;
 
 /* ---------- UI pieces ---------- */
+/* line icons for the section bar (24×24, drawn with the current text colour) */
+const TAB_ICONS = {
+  today:"M6.5 7v10M3.5 9.5v5M17.5 7v10M20.5 9.5v5M6.5 12h11",
+  progress:"M4 19.5h16M5.5 15.5l4.5-4.5 3 3 6-6.5M15 7.5h4v4",
+  ranking:"M8 4h8v5.5a4 4 0 0 1-8 0zM8 6H5v1.5a3 3 0 0 0 3 3M16 6h3v1.5a3 3 0 0 1-3 3M12 13.5V17M8.5 20h7M10 17h4v3h-4z",
+  own:"M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 1 0 0-17zM12 8.5v7M8.5 12h7",
+  account:"M12 12a4 4 0 1 0 0-8a4 4 0 0 0 0 8zM4.5 20.5a7.5 7.5 0 0 1 15 0",
+  workouts:"M4.5 6h15v14h-15zM4.5 10.5h15M9 3.5v4M15 3.5v4M8.5 14.5h3",
+  results:"M9 3.5h6v3H9zM7.5 5H5v15.5h14V5h-2.5M9 13.5l2 2 4-4.5",
+  clients:"M9 11a3.5 3.5 0 1 0 0-7a3.5 3.5 0 0 0 0 7zM3 20a6 6 0 0 1 12 0M15.5 4.3a3.5 3.5 0 0 1 0 6.4M17.5 14a6 6 0 0 1 3.5 6",
+  settings:"M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1M15 4.5v4M9 10v4M17 15.5v4"
+};
+const tabIcon = k => { const NS = "http://www.w3.org/2000/svg", s = document.createElementNS(NS, "svg"), p = document.createElementNS(NS, "path");
+  s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("aria-hidden", "true"); s.setAttribute("class", "tab-ic");
+  p.setAttribute("d", TAB_ICONS[k] || TAB_ICONS.today); s.append(p); return s; };
+/* section bar (icons + names; short names on phones). items: [key, label, shortLabel?, badge?] */
 HZ.tabBar = (items, cur, onPick) => el("nav", { class:"tabs", "aria-label":"Sekcje" },
-  items.map(([k,label]) => el("button", { type:"button", "aria-pressed":String(cur === k), onclick(){ onPick(k); }, text:label })));
+  items.map(([k, label, short, badge]) => { const two = short && short !== label;
+    return el("button", { type:"button", "aria-pressed":String(cur === k), "aria-current": cur === k ? "page" : null, "aria-label": badge ? `${label} (${badge})` : two ? label : null,
+      onclick(){ if (cur !== k){ onPick(k); window.scrollTo(0, 0); } } },
+      tabIcon(k), two ? [el("span", { class:"tab-l", text:label }), el("span", { class:"tab-s", text:short })] : el("span", { class:"tab-one", text:label }),
+      badge ? el("span", { class:"tab-badge", "aria-hidden":"true", text:String(badge) }) : null); }));
+
 HZ.fatiguePicker = (cur, onPick) => el("div", { class:"fatigue", role:"group", "aria-label":"Zmęczenie od 1 do 10" },
   Array.from({ length:10 }, (_,i) => i+1).map(n => el("button", { type:"button", "aria-pressed":String(cur === n), onclick(){ onPick(cur === n ? null : n); }, text:n })));
 HZ.loadInput = (ex, val, onVal, id) => {
@@ -545,10 +566,17 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
   return el("div", { class:"sets" + (opts.noRir ? " norir" : "") }, head, body, ctl);
 };
 HZ.tipBox = (sg, onPick, current) => el("div", { class:"tip " + sg.kind }, el("span", { class:"ic", "aria-hidden":"true", text:{ up:"↑", hold:"=", down:"↓", first:"•", plan:"★" }[sg.kind] }),
-  el("div", { class:"stack", style:"gap:6px" }, el("div", {}, el("b", { text:sg.title }), el("span", { text:sg.text })),
+  el("div", { class:"stack", style:"gap:6px;min-width:0" }, el("div", {}, el("b", { text:sg.title }), tipText(sg.text)),
     onPick && sg.options && sg.options.length > 1 ? el("div", { class:"chips" }, sg.options.map(o => el("button", { type:"button", class:"pick",
       "aria-pressed":String(JSON.stringify(current) === JSON.stringify(o.load)), onclick(){ onPick(o.load); }, text: o.label + (o.rec ? " · polecane" : "") }))) : null,
     onPick && sg.base != null ? customJump(sg, onPick, current) : null));
+/* long explanations: first lines only, "więcej" opens the rest */
+function tipText(t){
+  if (!t || t.length < 140) return el("span", { text:t || "" });
+  const sp = el("span", { class:"tip-txt clamp", text:t });
+  const b = el("button", { type:"button", class:"link small tip-more", "aria-expanded":"false", onclick(){ const open = sp.classList.toggle("clamp"); b.setAttribute("aria-expanded", String(!open)); b.textContent = open ? "więcej" : "mniej"; }, text:"więcej" });
+  return el("span", { class:"tip-wrap" }, sp, b);
+}
 /* participant's own jump, e.g. +0,5 or +5 kg */
 function customJump(sg, onPick, current){
   const isCustom = typeof current === "number" && current !== sg.next && current !== sg.base && !(sg.options || []).some(o => o.load === current);
@@ -556,8 +584,9 @@ function customJump(sg, onPick, current){
     value: isCustom && current > sg.base ? HZ.fmtKg(Math.round((current - sg.base) * 100) / 100) : "", style:"width:5rem;text-align:center;padding:6px 8px" });
   const go = () => { const v = HZ.parseNum(inp.value); if (v == null || v < 0 || v > 50){ HZ.toast("Wpisz skok od 0 do 50 kg, np. 0,5."); return; } onPick(Math.round((sg.base + v) * 100) / 100); };
   inp.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); go(); } });
-  return el("div", { class:"row small", style:"gap:6px" }, el("span", { text:"Własny skok: +" }), inp, el("span", { text:"kg" }),
-    el("button", { type:"button", class:"pick", "aria-pressed":String(isCustom), onclick: go, text: isCustom ? `→ ${HZ.fmtKg(current)} kg` : "Ustaw" }));
+  return el("details", { class:"jump", open: isCustom || null }, el("summary", { class:"small", text: isCustom ? `Własny skok → ${HZ.fmtKg(current)} kg` : "Własny skok" }),
+    el("div", { class:"row small", style:"gap:6px;margin-top:6px" }, el("span", { text:"+" }), inp, el("span", { text:"kg" }),
+      el("button", { type:"button", class:"pick", "aria-pressed":String(isCustom), onclick: go, text: isCustom ? `→ ${HZ.fmtKg(current)} kg` : "Ustaw" })));
 }
 /* participant picks how they do the exercise: weight, band or bodyweight */
 HZ.MODE_LABEL = { kg:"Ciężar", band:"Guma", bw:"Masa ciała" };
@@ -591,6 +620,19 @@ HZ.targetBox = (ex, sets, onSet, idp, auto) => {
     field = inp;
   }
   const plan = cur != null && warm.length ? [...warm.map((x, i) => `W${i + 1} ${HZ.loadName(ex, x.load)}`), `robocze ${HZ.loadName(ex, cur)}`].join(" → ") : null;
+  const ready = plan && warm.every(x => x.load != null && x.load !== "");
+  if (ready){
+    const steps = [...warm.map((x, i) => [`W${i + 1}`, HZ.loadName(ex, x.load)]), ["Robocze", HZ.loadName(ex, cur)]];
+    return el("div", { class:"target calc ready" + (auto ? " auto" : "") },
+      el("div", { class:"row between", style:"flex-wrap:nowrap" },
+        el("span", { class:"small calc-src", text: auto === "plan" ? "✓ Rozgrzewka z zalecenia trenera" : auto ? "✓ Rozgrzewka wyliczona z podpowiedzi" : "✓ Twoja rozgrzewka" }),
+        el("button", { type:"button", class:"link small", onclick(){ HZ.warmGuide(); }, text:"Jak to działa?" })),
+      el("ol", { class:"calc-chain", "aria-label":"Kolejne serie: " + plan }, steps.map(([n, v], i) => el("li", { class: i === steps.length - 1 ? "work" : null }, el("span", { class:"cc-n", text:n }), el("span", { class:"cc-v", text:v })))),
+      el("details", { class:"calc-change" }, el("summary", { class:"small", text: band ? "Inna guma robocza" : "Inny ciężar roboczy" }),
+        el("div", { class:"row", style:"flex-wrap:nowrap;gap:6px;margin-top:6px" }, el("div", { style: band ? "flex:1;min-width:0" : "" }, field),
+          el("button", { type:"button", onclick: go, text: band ? "Rozpisz rozgrzewkę" : "Przelicz" })),
+        el("span", { class:"small muted", text: band ? "Zaczynasz od mocniejszej gumy (więcej pomocy) i schodzisz do gumy roboczej." : "W2 ≈60%, W3 ≈80% ciężaru roboczego, zaokrąglone do talerzy." })));
+  }
   return el("div", { class:"target calc" },
     el("div", { class:"row between", style:"flex-wrap:nowrap" }, el("b", { text:"🧮 Oblicz rozgrzewkę" }), el("button", { type:"button", class:"link small", onclick(){ HZ.warmGuide(); }, text:"ℹ️ Jak to działa?" })),
     el("ol", { class:"calc-steps small" },

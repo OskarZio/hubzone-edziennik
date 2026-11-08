@@ -57,7 +57,7 @@ function view(){
   const warn = !A.joinCode ? el("div", { class:"notice" }, "Kod klubu nie jest ustawiony, więc konto może założyć każdy, kto zna link. ",
     el("button", { class:"link", onclick(){ A.tab = "settings"; HZ.LS.set("hz-admin-tab", "settings"); render(); }, text:"Ustaw kod" })) : null;
   if (A.showQr) return [qrScreen()];
-  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results", pendingAll().length ? `Wyniki (${pendingAll().length})` : "Wyniki"],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), ...body(), HZ.footer()];
+  return [header(), warn, HZ.tabBar([["workouts","Treningi"],["results","Wyniki","Wyniki", pendingAll().length || null],["clients","Klienci"],["ranking","Ranking"],["settings","Ćwiczenia i ustawienia","Ustawienia"]], A.tab, k => { A.tab = k; HZ.LS.set("hz-admin-tab", k); render(); }), el("div", { class:"view v-" + A.tab }, ...[body()].flat(Infinity).filter(Boolean)), HZ.footer()];
 }
 function header(){
   return el("header", { class:"top" }, HZ.brand("e-Dziennik · panel trenera"),
