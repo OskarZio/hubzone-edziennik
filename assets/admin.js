@@ -6,7 +6,7 @@ const app = document.getElementById("app");
 const A = { session:null, profile:null, checked:false, authMode:"login", tab:HZ.LS.get("hz-admin-tab") || "workouts",
   clients:[], stats:{}, editW:null, editC:null, confirmDel:null, res:{ wid:null, rows:null, loading:false }, clientId:null, clientLogs:null, joinCode:undefined, error:null };
 
-function render(){ HZ.swap(app, view()); }
+function render(){ HZ.swap(app, view(), A.session ? A.tab + (A.showQr ? "-qr" : "") : "pre"); }
 
 /* security: the trainer panel signs out after 30 min without activity */
 const IDLE_MS = 30 * 60 * 1000; let idleTimer = null;
@@ -71,7 +71,7 @@ function body(){
   if (A.tab === "clients") return clientsView();
   if (A.tab === "ranking"){
     if (!A.rankRows){ refreshRanking().then(() => render());
-      return [el("div", { class:"empty", text:"Wczytuję ranking…" })]; }
+      return [HZ.skeleton(2)]; }
     const inRank = new Set(A.rankRows.map(x => x.id));
     const missing = A.clients.filter(c => !inRank.has(c.id)).map(c => {
       const cs = c.consent || {}, n = (A.stats[c.id] || { n:0 }).n;
@@ -361,7 +361,7 @@ function resultsView(){
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Wpisało się" }), el("span", { class:"v", text:`${done.length}/${expected}` }), absent.size ? el("span", { class:"small muted", text:`nieobecni: ${A.clients.filter(c => absent.has(c.id)).length}` }) : null),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Śr. zmęczenie" }), el("span", { class:"v", text:avg })),
       el("div", { class:"stat" }, el("span", { class:"eyebrow", text:"Stacje" }), el("span", { class:"v", text:((ws.find(w => w.id === wid) || {}).stations || []).length })))
-      : el("p", { class:"muted", text:"Wczytuję wpisy…" }),
+      : HZ.skeleton(2),
     el("div", { class:"row" }, S.config.features.requireStart ? openBtn(ws.find(w => w.id === wid)) : null, el("button", { onclick(){ loadResults(wid); }, text:"Odśwież" }), done.length ? el("button", { onclick(){ exportCsv(wid, done); }, text:"Pobierz CSV" }) : null))];
   const q = approvalCard(); if (q) out.unshift(q);
   if (rows && !A.clients.length) out.push(el("div", { class:"empty", text:"Nikt jeszcze nie założył konta. Wyślij klientom link do strony głównej i kod klubu." }));

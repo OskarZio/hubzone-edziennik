@@ -237,7 +237,8 @@ HZ.fmtDate = (iso, long) => { if (!iso) return ""; const [y,m,d] = iso.split("-"
   return long ? dt.toLocaleDateString("pl-PL", { weekday:"long", day:"numeric", month:"long" }) : `${DAYS[dt.getDay()]} ${String(d).padStart(2,"0")}.${String(m).padStart(2,"0")}`; };
 HZ.LS = { get(k){ try { return JSON.parse(localStorage.getItem(k)); } catch(e){ return null; } }, set(k,v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){} } };
 let toastTimer;
-HZ.toast = msg => { document.querySelectorAll(".toast").forEach(t => t.remove()); const t = el("div", { class:"toast", role:"status", text:msg }); document.body.append(t); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.remove(), 2800); };
+HZ.buzz = p => { try { if (navigator.vibrate) navigator.vibrate(p); } catch(e){} };
+HZ.toast = msg => { document.querySelectorAll(".toast").forEach(t => t.remove()); const t = el("div", { class:"toast", role:"status", text:msg }); document.body.append(t); HZ.buzz(12); clearTimeout(toastTimer); setTimeout(() => t.classList.add("out"), Math.max(1200, 2300 + String(msg).length * 30)); toastTimer = setTimeout(() => t.remove(), 2800); };
 /* workout sections: main lifts first, then accessory stations */
 HZ.SECTIONS = [
   { key:"main", title:"Trening główny", sub:"boje", item:"Bój", add:"+ Dodaj bój" },
@@ -263,7 +264,9 @@ HZ.TYPE_LABEL = { kg:"ciężar (kg)", band:"guma (asysta)", bw:"masa ciała" };
 HZ.plural = (n, one, few, many) => n === 1 ? one : (n%10 >= 2 && n%10 <= 4 && (n%100 < 10 || n%100 >= 20)) ? few : many;
 
 /* re-render keeping scroll and the field the user just tapped */
-HZ.swap = (app, nodes) => {
+let swapKey;
+HZ.swap = (app, nodes, key) => {
+  if (key !== undefined){ if (swapKey !== undefined && key !== swapKey){ app.classList.remove("vt"); void app.offsetWidth; app.classList.add("vt"); } swapKey = key; }   // section changed → short rise-in
   const y = window.scrollY, a = document.activeElement, id = a && a.id, sel = a && typeof a.selectionStart === "number" ? [a.selectionStart, a.selectionEnd] : null;
   app.replaceChildren(...nodes.flat(Infinity).filter(Boolean)); window.scrollTo(0, y);
   if (id){ const n = document.getElementById(id); if (n && n !== a){ n.focus({ preventScroll:true }); if (sel && typeof n.setSelectionRange === "function") try { n.setSelectionRange(sel[0], sel[1]); } catch(e){} } }
@@ -499,6 +502,40 @@ HZ.tabBar = (items, cur, onPick) => el("nav", { class:"tabs", "aria-label":"Sekc
       tabIcon(k), two ? [el("span", { class:"tab-l", text:label }), el("span", { class:"tab-s", text:short })] : el("span", { class:"tab-one", text:label }),
       badge ? el("span", { class:"tab-badge", "aria-hidden":"true", text:String(badge) }) : null); }));
 
+/* placeholder cards while data loads */
+HZ.skeleton = (n = 3) => el("div", { class:"skel-wrap", role:"status", "aria-label":"Wczytuję…" }, Array.from({ length:n }, (_, i) =>
+  el("div", { class:"card skel" }, el("span", { class:"sk sk-h" }), el("span", { class:"sk" }), el("span", { class:"sk", style:`width:${[72, 54, 64][i % 3]}%` }))));
+/* tap a number field → whole value selected, so the next digit replaces it */
+document.addEventListener("focusin", e => { const t = e.target; if (t && t.matches && t.matches("input[inputmode]") && t.value) try { t.select(); } catch(err){} });
+/* no internet: say so (typed results stay on the phone) */
+(() => { let bar; const show = () => { const off = navigator.onLine === false;
+    if (off && !bar){ bar = el("div", { class:"offline", role:"status", text: document.body.classList.contains("admin") ? "Brak internetu – zmiany mogą się nie zapisać" : "Brak internetu – wpisy zostają w telefonie, wyślij po powrocie sieci" }); document.body.append(bar); }
+    else if (!off && bar){ bar.remove(); bar = null; HZ.toast("Internet wrócił"); } };
+  window.addEventListener("offline", show); window.addEventListener("online", show); document.addEventListener("DOMContentLoaded", show); })();
+/* ---------- rest timer: floating pill, survives re-renders, beeps and vibrates at the end ---------- */
+HZ.parseRest = t => { if (t == null) return null; const s = String(t).toLowerCase().replace(",", ".").trim(); let m;
+  if ((m = s.match(/^(\d+):(\d{1,2})$/))) return +m[1] * 60 + +m[2];
+  if ((m = s.match(/([\d.]+)\s*min/))){ const sec = s.match(/min\D*(\d+)\s*s/); return Math.round(parseFloat(m[1]) * 60) + (sec ? +sec[1] : 0); }
+  if ((m = s.match(/([\d.]+)/))) return Math.round(parseFloat(m[1])); return null; };
+HZ.fmtClock = sec => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+HZ.rest = (() => { let end = 0, total = 0, label = "", node, tick, ac, doneT;
+  const soundOn = () => HZ.LS.get("hz-rest-sound") !== false;
+  const beep = () => { if (!soundOn() || !ac) return; try { [0, .28, .56].forEach(t => { const o = ac.createOscillator(), g = ac.createGain(), at = ac.currentTime + t; o.frequency.value = 880; o.connect(g); g.connect(ac.destination);
+    g.gain.setValueAtTime(.0001, at); g.gain.exponentialRampToValueAtTime(.3, at + .02); g.gain.exponentialRampToValueAtTime(.0001, at + .2); o.start(at); o.stop(at + .22); }); } catch(e){} };
+  const stop = () => { clearInterval(tick); clearTimeout(doneT); end = 0; if (node){ node.remove(); node = null; } document.body.classList.remove("resting"); };
+  const draw = () => { if (!node) return; const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    node.querySelector(".rt-time").textContent = HZ.fmtClock(left); node.style.setProperty("--p", String(total ? Math.min(1, 1 - left / total) : 1));
+    if (left <= 0){ clearInterval(tick); node.classList.add("done"); node.querySelector(".rt-label").textContent = "Koniec przerwy – do roboty!"; HZ.buzz([220, 120, 220, 120, 320]); beep(); doneT = setTimeout(stop, 8000); } };
+  const start = (sec, name) => { stop(); if (!sec || sec < 1) return; total = sec; end = Date.now() + sec * 1000; label = name || "Przerwa";
+    try { const AC = window.AudioContext || window.webkitAudioContext; if (AC && soundOn()){ ac = ac || new AC(); if (ac.state === "suspended") ac.resume(); } } catch(e){}
+    const snd = el("button", { type:"button", class:"rt-btn", "aria-label":"Dźwięk na koniec przerwy", "aria-pressed":String(soundOn()), onclick(){ HZ.LS.set("hz-rest-sound", !soundOn()); snd.setAttribute("aria-pressed", String(soundOn())); snd.textContent = soundOn() ? "🔔" : "🔕"; }, text: soundOn() ? "🔔" : "🔕" });
+    node = el("div", { class:"rest-timer", role:"timer", "aria-live":"off" },
+      el("div", { class:"rt-main" }, el("span", { class:"rt-time", text:HZ.fmtClock(sec) }), el("span", { class:"rt-label", text:label })),
+      el("button", { type:"button", class:"rt-btn", "aria-label":"Dodaj 30 sekund", onclick(){ if (node.classList.contains("done")) return start(30, name); end += 30000; total += 30; draw(); }, text:"+30 s" }),
+      snd, el("button", { type:"button", class:"rt-btn", "aria-label":"Zakończ przerwę", onclick: stop, text:"✕" }));
+    document.body.append(node); document.body.classList.add("resting"); HZ.buzz(15); draw(); tick = setInterval(draw, 250); };
+  document.addEventListener("visibilitychange", () => { if (end && document.visibilityState === "visible") draw(); });
+  return { start, stop, active: () => end > 0 }; })();
 HZ.fatiguePicker = (cur, onPick) => el("div", { class:"fatigue", role:"group", "aria-label":"Zmęczenie od 1 do 10" },
   Array.from({ length:10 }, (_,i) => i+1).map(n => el("button", { type:"button", "aria-pressed":String(cur === n), onclick(){ onPick(cur === n ? null : n); }, text:n })));
 HZ.loadInput = (ex, val, onVal, id) => {
@@ -559,7 +596,7 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     el("button", { type:"button", class:"ghost", onclick(){ const last = sets.filter(s => !s.warmup).pop(); sets.push({ load: last ? last.load : null, reps:null, rir:null }); onChange(true); }, text:"+ seria" }),
     nWork > 1 ? el("button", { type:"button", class:"ghost", onclick(){ sets.pop(); onChange(true); }, text:"− seria" }) : null);
   const body = []; rows.forEach((r, i) => {
-    if (nWarm && i === 0) body.push(el("div", { class:"setsec warm row between", style:"flex-wrap:nowrap" }, el("span", { text:"Rozgrzewka – serie wstępne (W1, W2…)" }),
+    if (nWarm && i === 0) body.push(el("div", { class:"setsec warm row between", style:"flex-wrap:nowrap" }, el("span", { text:"Rozgrzewka – serie wstępne" }),
       el("button", { type:"button", class:"wg-btn", onclick(){ HZ.warmGuide(); }, text:"ℹ️ Instrukcja" })));
     if (nWarm && i === nWarm) body.push(el("div", { class:"setsec", text:"Serie robocze – te się liczą" }));
     body.push(r); });
