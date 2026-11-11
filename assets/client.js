@@ -317,7 +317,7 @@ function stationCard(w, st, exBase, label, d, isSuper){
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", {}, HZ.kindDot(exBase), HZ.kindOf(exBase) ? " " : null, ex.name)),
       el("div", { class:"stack st-side" }, el("div", { class:"row", style:"gap:4px;justify-content:flex-end" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }),
         tRir != null ? el("span", { class:"badge rir", title:"Docelowy zapas powtórzeń", text:`RIR ${tRir}` }) : null),
-        el("button", { type:"button", class:"rest-btn", title:"Odlicz przerwę między seriami", onclick(){ HZ.rest.start(restSec, ex.name); }, text:`⏱ Przerwa ${HZ.fmtClock(restSec)}` }))),
+        HZ.feat("timer") ? el("button", { type:"button", class:"rest-btn", title:"Odlicz przerwę między seriami", onclick(){ HZ.rest.start(restSec, ex.name); }, text:`⏱ Przerwa ${HZ.fmtClock(restSec)}` }) : null)),
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
     HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = freshSets(w, st, exBase, m); saveDrafts(); render(); }, exBase),
     HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); saveDrafts(); render(); }, curLoad),

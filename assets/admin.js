@@ -651,6 +651,7 @@ function featCard(){
       sel("rir", "RIR (zapas powtórzeń)", "Bez RIR podpowiedzi opierają się na zrobionych powtórzeniach."),
       sel("acc", "Akcesoria (stacje)", "Wyłączone: klient widzi tylko trening główny. Akcesoria zostają w planie."),
       sel("pain", "„Czy coś bolało?” (beta)", "Po wpisaniu klient dostaje radę: zmniejsz ciężar albo zapytaj trenera.")),
+    chk("timer", "Stoper przerwy", "przycisk „⏱ Przerwa” przy każdym ćwiczeniu: odlicza przerwę między seriami i daje sygnał na koniec."),
     chk("requireStart", "Wpisywanie dopiero po rozpoczęciu treningu", "w Treningach klikasz „Rozpocznij” na zajęciach i „Zakończ” po nich. Bez tego nikt spoza zajęć nic nie wpisze."),
     chk("approve", "Każdy rekord ciężaru zatwierdzam ja", "bez tego zatwierdzasz tylko podejrzanie duże skoki (więcej niż 2× skok ciężaru albo 10%). Niezatwierdzone nie liczą się do rankingu.", () => ({ approveSince:HZ.todayISO() })),
     chk("holo", "Animacja holograficzna podium", "błyszczące naklejki za 1., 2. i 3. miejsce w rankingu."),
