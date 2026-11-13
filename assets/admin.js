@@ -310,7 +310,7 @@ function workoutEditor(){
           el("div", { class:"grid3" },
             sec.key !== "main" ? null : el("label", { class:"f" }, "Serie wstępne", el("input", { id:`st-wu-${s.id}`, inputmode:"numeric", placeholder:"0", value: s.warmup ? String(s.warmup) : "", oninput(e){ s.warmup = Math.min(6, Math.max(0, Math.round(HZ.parseNum(e.target.value) || 0))); } })),
             el("label", { class:"f" }, "Serie robocze", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
-            el("label", { class:"f" }, "Powtórzenia (np. 5 albo 6-8)", el("input", { id:`st-r-${s.id}`, inputmode:"text", value: HZ.stRange(s) ? `${s.reps}-${s.repsMax}` : String(s.reps || ""), placeholder:"np. 6-8", oninput(e){ const r = HZ.parseReps(e.target.value); s.reps = r.reps; s.repsMax = r.repsMax; } })),
+            el("label", { class:"f" }, "Powtórzenia", el("input", { id:`st-r-${s.id}`, inputmode:"text", value: HZ.stRange(s) ? `${s.reps}-${s.repsMax}` : String(s.reps || ""), placeholder:"5 albo 6-8", oninput(e){ const r = HZ.parseReps(e.target.value); s.reps = r.reps; s.repsMax = r.repsMax; } })),
             el("label", { class:"f" }, "RIR", el("select", { id:`st-rir-${s.id}`, value: s.rir != null ? String(s.rir) : "", onchange(e){ s.rir = e.target.value === "" ? null : Number(e.target.value); } },
               el("option", { value:"", text: w.rir != null ? `jak trening (${w.rir})` : "–" }), [0,1,2,3,4].map(n => el("option", { value:String(n), text:String(n) })))),
             el("label", { class:"f" }, sec.key === "main" ? "Czas" : "Czas na stacji", el("input", { id:`st-w-${s.id}`, maxlength:"30", value:s.work || "", placeholder:"np. 8 min", oninput(e){ s.work = e.target.value; } })),
@@ -380,11 +380,11 @@ function announceCard(){
   const s = S.config.schedule || {}, sd = (A.schDraft = A.schDraft || { day: s.day ?? 5, time:s.time || "", dur:s.dur || 60, place:s.place || "" });
   return el("div", { class:"card" }, el("h3", { text:"Ogłoszenie i termin zajęć" }),
     el("label", { class:"f" }, "Ogłoszenie dla wszystkich (na górze aplikacji)", el("textarea", { id:"ann-text", rows:"2", maxlength:"300", placeholder:"np. W piątek zaczynamy 15 min później.", value:st.text, oninput(e){ st.text = e.target.value; } })),
-    el("div", { class:"grid2" }, el("label", { class:"f" }, "Pokazuj do (opcjonalnie)", el("input", { id:"ann-until", type:"date", value:st.until, onchange(e){ st.until = e.target.value; } })),
-      el("div", { class:"row", style:"align-self:flex-end" }, el("button", { class:"primary", async onclick(){ const t = st.text.trim(); const val = t ? { text:t.slice(0, 300), until:st.until || null, at:new Date().toISOString() } : null;
+    el("label", { class:"f" }, "Pokazuj do (opcjonalnie)", el("input", { id:"ann-until", type:"date", value:st.until, onchange(e){ st.until = e.target.value; } })),
+      el("div", { class:"row" }, el("button", { class:"primary", async onclick(){ const t = st.text.trim(); const val = t ? { text:t.slice(0, 300), until:st.until || null, at:new Date().toISOString() } : null;
           const { error } = await HZ.api.setLibraryField({ announce:val }); if (error){ toast(HZ.dbError(error)); return; } S.config.announce = val; toast(t ? "Ogłoszenie opublikowane" : "Ogłoszenie usunięte"); render(); }, text: a.text ? "Zapisz" : "Opublikuj" }),
-        a.text ? el("button", { class:"ghost", async onclick(){ const { error } = await HZ.api.setLibraryField({ announce:null }); if (error){ toast(HZ.dbError(error)); return; } S.config.announce = null; A.annDraft = { text:"", until:"" }; toast("Ogłoszenie usunięte"); render(); }, text:"Usuń" }) : null)),
-    el("hr"),
+        a.text ? el("button", { class:"ghost", async onclick(){ const { error } = await HZ.api.setLibraryField({ announce:null }); if (error){ toast(HZ.dbError(error)); return; } S.config.announce = null; A.annDraft = { text:"", until:"" }; toast("Ogłoszenie usunięte"); render(); }, text:"Usuń" }) : null),
+    el("div", { class:"sep", role:"separator" }),
     el("p", { class:"small muted", text:"Termin zajęć: klienci mogą dodać zajęcia do kalendarza w telefonie (przypomnienie 2 godziny wcześniej)." }),
     el("div", { class:"grid2" },
       el("label", { class:"f" }, "Dzień", el("select", { id:"sch-day", value:String(sd.day), onchange(e){ sd.day = Number(e.target.value); } }, [1,2,3,4,5,6,0].map(d => el("option", { value:String(d), text:HZ.DAY_NAMES[d] })))),
