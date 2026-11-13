@@ -28,7 +28,7 @@ const painOf = d => HZ.feat("pain", C.profile) && d && d.painOn && (d.pain || ""
 const rirOn = () => HZ.feat("rir", C.profile);
 const custom = () => !!(S.config.features && S.config.features.custom);
 const tipFor = (w, st, exBase, mode) => HZ.trainerTip(C.plan, C.logs, exBase.id, mode)
-  || HZ.suggest(HZ.dropRejected(C.logs, C.appr), exBase.id, mode, custom() ? HZ.progEx(exBase, C.profile.progression) : exBase, w.id, rirOn() ? HZ.targetRir(w, st) : null);
+  || HZ.suggest(HZ.dropRejected(C.logs, C.appr), exBase.id, mode, custom() ? HZ.progEx(exBase, C.profile.progression) : exBase, w.id, rirOn() ? HZ.targetRir(w, st) : null, HZ.stRange(st));
 const isLocked = w => !!(S.config.features && S.config.features.requireStart) && w.open !== true;   // trainer's account too (results for clients go through the panel)
 
 async function loadAll(){
@@ -315,7 +315,7 @@ function stationCard(w, st, exBase, label, d, isSuper){
   return el("section", { id:"st-" + st.id, class:"card station" + (HZ.secOf(st) === "main" ? " main" : "") + (isSuper ? " super" : "") + (HZ.kindOf(exBase) ? " k-" + HZ.kindOf(exBase) : "") },
     el("div", { class:"row between", style:"align-items:flex-start" },
       el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:label }), el("h3", {}, HZ.kindDot(exBase), HZ.kindOf(exBase) ? " " : null, ex.name)),
-      el("div", { class:"stack st-side" }, el("div", { class:"row", style:"gap:4px;justify-content:flex-end" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }),
+      el("div", { class:"stack st-side" }, el("div", { class:"row", style:"gap:4px;justify-content:flex-end" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${HZ.repsTxt(st)}` }),
         tRir != null ? el("span", { class:"badge rir", title:"Docelowy zapas powtórzeń", text:`RIR ${tRir}` }) : null),
         HZ.feat("timer") ? el("button", { type:"button", class:"rest-btn", title:"Odlicz przerwę między seriami", onclick(){ HZ.rest.start(restSec, ex.name); }, text:`⏱ Przerwa ${HZ.fmtClock(restSec)}` }) : null)),
     extra.length ? el("div", { class:"small muted", text: extra.join(" · ") }) : null,
@@ -333,7 +333,7 @@ function buildEntries(w, d){
   const entries = [];
   for (const st of (w.stations || [])){ const ex = HZ.exById(st.exId); if (!ex) continue;
     const sets = cleanSets(d.st[st.id] || []);
-    if (sets.length) entries.push({ stationId:st.id, exId:ex.id, exName:ex.name, type:(d.mode && d.mode[st.id]) || ex.type, ...(HZ.targetRir(w, st) != null ? { targetRir:HZ.targetRir(w, st) } : {}), targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.reps || 0, sets }); }
+    if (sets.length) entries.push({ stationId:st.id, exId:ex.id, exName:ex.name, type:(d.mode && d.mode[st.id]) || ex.type, ...(HZ.targetRir(w, st) != null ? { targetRir:HZ.targetRir(w, st) } : {}), targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.repsMax || st.reps || 0, ...(HZ.stRange(st) ? { repsMin:st.reps } : {}), sets }); }
   return entries;
 }
 function stationState(w, st, d){

@@ -346,7 +346,9 @@ HZ.warmSets = e => (e.sets || []).filter(s => s.warmup);
    W1 = movement practice: empty bar / strongest band, 5–6 reps
    W2 ≈ 60% of working weight, 3–4 reps
    W3 ≈ 80% (70–80%), 1–2 reps   e.g. working 90 kg → 72,5 kg  (75 kg would be 83%) */
-HZ.WARM_REPS = (i, n, type, ex) => i === 0 ? ((ex && ex.warmReps) || (type === "band" ? "6–8" : "5–6")) : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
+HZ.WARM_REPS = (i, n, type, ex) => i === 0 ? ((type === "band" ? ex && ex.warmRepsBand : ex && ex.warmReps) || (type === "band" ? "6–8" : "5–6")) : (n >= 3 && i === n - 1 ? "1–2" : "3–4");
+/* W1 description: separate for people on a band and people without a band / with weight (e.g. band: "aktywacja łopatek", weight: "podciąganie bez ciężaru") */
+HZ.warmText = ex => ex && ex.type === "band" ? (ex.warmLabelBand || "Aktywacja łopatek") : ((ex && ex.warmLabel) || "Aktywacja łopatek");
 HZ.SCAP = "scap";   // band mode, 1st warm-up: scapular activation on the bar, no band
 HZ.warmPct = (i, n) => n === 1 ? 0.5 : i === 0 ? 0.45 : n === 2 ? 0.6 : n === 3 ? [0.45, 0.6, 0.8][i] : 0.5 + 0.3 * (i - 1) / (n - 2);
 HZ.warmupLoads = (ex, n, next) => {
@@ -402,14 +404,24 @@ HZ.incRange = ex => {
   let hi = Number(ex.incMax ?? ex.inc) || 2.5, lo = Number(ex.incMin) || Math.min(1.25, hi);
   if (lo > hi) [lo, hi] = [hi, lo]; return [lo, hi];
 };
+/* rep range of a station, e.g. "6-8" → 6…8 (trainer types it in the workout) */
+HZ.parseReps = v => { const m = String(v ?? "").match(/(\d+)\s*(?:[-–—]|do|\.\.)\s*(\d+)/); if (m){ const a = +m[1], b = +m[2]; return { reps:Math.min(a, b), repsMax: a === b ? null : Math.max(a, b) }; }
+  const n = Math.round(HZ.parseNum(v) || 0); return { reps:n, repsMax:null }; };
+HZ.stRange = st => st && st.repsMax > st.reps ? { lo:st.reps, hi:st.repsMax } : null;
+HZ.repsTxt = st => st ? (HZ.stRange(st) ? `${st.reps}–${st.repsMax}` : String(st.reps || "?")) : "?";
 const repRange = (a, b) => { a = Math.max(1, a); b = Math.max(1, b); return a === b ? String(a) : `${a}–${b}`; };
 /* targetRir: trainer's planned RIR for today (optional). Lower than last time's reserve → heavier, higher → hold or lighter. */
-HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
+HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null, range = null) => {
   const { fmtKg, fmtDate, bandName, bandIdx, fmtLoad } = HZ;
   const h = HZ.history(logs, exId, excludeWorkoutId, type);
   const goal = targetRir != null ? ` Cel na dziś: RIR ${targetRir}.` : "";
+  if (!h.length && range) return { kind:"first", title:"Pierwszy raz w tym trybie", text:`Zakres ${range.lo}–${range.hi} powtórzeń: zacznij od ${range.lo} w każdej serii, z zapasem 1–2 powtórzeń.`, next:null, reps:String(range.lo) };
   if (!h.length) return { kind:"first", title:"Pierwszy raz w tym trybie", text: targetRir != null ? `Dobierz obciążenie tak, żeby na końcu serii zostało ${targetRir} powt. zapasu (RIR ${targetRir}).` : (HZ.rirOn === false ? "Dobierz obciążenie, z którym zrobisz wszystkie serie i zostaną ci jeszcze 2–3 powtórzenia w zapasie." : "Dobierz obciążenie, przy którym na końcu serii zostają ci 2–3 powtórzenia zapasu (RIR 2–3)."), next:null };
-  const { log, entry } = h[0]; const load = HZ.workLoad(entry); const { hit, minRir } = HZ.judge(entry);
+  const { log, entry } = h[0]; const load = HZ.workLoad(entry); let { hit, minRir } = HZ.judge(entry);
+  // rep range (e.g. 6–8): today's range from the workout, else the one saved with the last result
+  const R = range || (entry.repsMin && entry.targetReps > entry.repsMin ? { lo:entry.repsMin, hi:entry.targetReps } : null);
+  const workDone = entry.sets.filter(s => !s.warmup && s.reps != null), lowReps = workDone.length ? Math.min(...workDone.map(s => s.reps)) : 0;
+  if (R) hit = workDone.length >= (entry.targetSets || workDone.length) && lowReps >= R.hi;   // top of the range in every set → time to add weight
   if (log.pain) return { kind:"down", title:"Ostatnio coś bolało", text:`Po treningu ${fmtDate(log.date)} zgłoszono: „${log.pain}”. Zmniejsz ciężar albo zapytaj trenera, zanim dołożysz.`, next:load, base: type === "kg" ? (load || 0) : null };
   const setTxt = entry.sets.map(s => type === "kg" ? `${fmtKg(s.load)}×${s.reps ?? "–"}` : type === "band" ? `${bandName(s.load)}×${s.reps ?? "–"}` : `${s.reps ?? "–"}`).join(" · ");
   const last = `Ostatnio (${fmtDate(log.date)}): ${setTxt}` + (minRir != null ? `, najniższy RIR ${minRir}` : "");
@@ -417,7 +429,7 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
   const [lo, hi] = HZ.incRange(ex);
   const bands = S.config.bands;
   if (hit){
-    const T = entry.targetReps || 5;
+    const T = R ? R.hi : entry.targetReps || 5;
     let small = minRir == null || minRir <= 1;             // RIR 0–1 (or not given): small jump, expect 3–4 reps
     if (targetRir != null && minRir != null){
       const room = minRir - targetRir;                     // reserve left last time vs. reserve planned today
@@ -431,7 +443,7 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
       if (room === -1) return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}`, text:`${last}.${goal} Ostatnio zapas był mniejszy, więc dziś nie dokładaj.`, next:load, base: type === "kg" ? (load || 0) : null };
       small = room === 0;                                   // exactly as planned → small jump; more reserve → bigger
     }
-    const reps = String(Math.max(1, T - 2));   // double progression: after the jump go 2 reps down, then +1 rep each session up to the target
+    const reps = R ? String(R.lo) : String(Math.max(1, T - 2));   // double progression: after the jump back to the bottom of the range (or 2 reps down), then +1 rep each session
     const why = minRir == null ? "nie wpisano RIR" : small ? `RIR ${minRir}, mały zapas` : `RIR ${minRir}, jest zapas`;
     if (type === "kg"){
       const base = load || 0, rec = small ? lo : hi;
@@ -460,6 +472,8 @@ HZ.suggest = (logs, exId, type, ex, excludeWorkoutId, targetRir = null) => {
     if (type === "band"){ const i = load === "none" ? bands.length : bandIdx(load); const nx = i > 0 ? bands[i-1].id : load;
       return { kind:"down", title: nx === load ? "Zostań przy tej gumie" : `Mocniejsza guma → ${HZ.bandFull(nx)}`, text:last + ". Dwa treningi z rzędu bez poprawy na tym ciężarze.", next:nx }; }
   }
+  if (R){ const nx = Math.min(R.hi, Math.max(R.lo, lowReps + 1));
+    return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)}, cel ${nx} powt.`, text:last + `. Zakres ${R.lo}–${R.hi}: co trening +1 powtórzenie (${R.lo} → ${R.hi}), a gdy zrobisz ${R.hi} we wszystkich seriach – dokładasz i wracasz do ${R.lo}.` + goal, next:load, reps:String(nx), base: type === "kg" ? (load || 0) : null }; }
   const T2 = entry.targetReps || 5, low = Math.min(...entry.sets.map(x => x.reps || 0));
   return { kind:"hold", title:`Zostań przy: ${fmtLoad(type, load)} i dołóż powtórzenie`, text:last + `. Cel to ${T2} powt. w każdej serii – dziś spróbuj o 1 więcej (${Math.min(T2, low + 1)}).` + goal, next:load, reps:String(Math.min(T2, low + 1)), base: type === "kg" ? (load || 0) : null };
 };
@@ -576,13 +590,13 @@ HZ.setsEditor = (ex, sets, keyPrefix, onChange, opts = {}) => {
     return el("div", { class:"set" + (s.warmup ? " warm" : "") },
       el("span", { class:"n", title: s.warmup ? "Seria wstępna" : null, text:label }),
       el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" }, sw ? el("span", { class:"swatch", style:`background:${sw}` }) : null,
-        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text: ex.warmLabel || "Aktywacja łopatek" })
+        s.warmup && s.load === HZ.SCAP ? el("span", { class:"scap", text: HZ.warmText(ex) })
           : mixable ? el("div", { class:"kgwrap" }, HZ.loadInput(onBand ? { ...ex, type:"band" } : ex, s.load, onLoad, `${keyPrefix}-l${i}`),
               el("button", { type:"button", class:"nokg-btn", title: onBand ? "Zmień na ciężar" : "Zmień na gumę", onclick(){ s.load = onBand ? null : S.config.bands[0].id; s.manual = true; onChange(true); }, text: onBand ? "kg" : "guma" }))
           : HZ.loadInput(ex, s.load, onLoad, `${keyPrefix}-l${i}`)),
       el("input", { id:`${keyPrefix}-r${i}`, inputmode:"numeric", placeholder: s.warmup ? HZ.WARM_REPS(warmIdx(i), sets.filter(x => x.warmup).length, ex.type, ex) : (opts.repsHint || "–"), "aria-label":"Powtórzenia", value: s.reps == null ? "" : String(s.reps),
         oninput(e){ const n = HZ.parseNum(e.target.value); s.reps = n == null ? null : Math.round(n); onChange(false); } }),
-      s.warmup ? (warmIdx(i) === 0 && ex.warmLabel && s.load !== HZ.SCAP ? el("span", { class:"wnote", text:ex.warmLabel }) : null) : (opts.noRir ? null : HZ.rirPicker(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`)));
+      s.warmup ? (warmIdx(i) === 0 && (ex.type === "band" ? ex.warmLabelBand : ex.warmLabel) && s.load !== HZ.SCAP ? el("span", { class:"wnote", text:HZ.warmText(ex) }) : null) : (opts.noRir ? null : HZ.rirPicker(s.rir, v => { s.rir = v; onChange(false); }, `${keyPrefix}-i${i}`)));
   });
   const nWarm = sets.filter(s => s.warmup).length, nWork = sets.length - nWarm;
   const ctl = el("div", { class:"row" },
@@ -637,7 +651,7 @@ HZ.modeToggle = (cur, onPick, exBase) => { const ok = exBase ? HZ.modesOf(exBase
   ok.map(m => el("button", { type:"button", "aria-pressed":String(cur === m), onclick(){ if (cur !== m) onPick(m); }, text:HZ.MODE_LABEL[m] }))); };
 /* "target weight" for the working sets: warm-ups are calculated from it (W2 ≈60%, W3 ≈80%; W1 set by the trainer) */
 /* warm-up calculator: enter the working weight (or pick the working band) → W1, W2, W3 are filled in */
-HZ.loadName = (ex, v) => v === HZ.SCAP ? (ex.warmLabel || "aktywacja") : typeof v === "string" ? (v === "none" ? "bez gumy" : HZ.bandName(v)) : v === 0 ? "bez ciężaru" : v == null || v === "" ? "?" : HZ.fmtKg(v) + " kg";
+HZ.loadName = (ex, v) => v === HZ.SCAP ? HZ.warmText(ex).toLowerCase() : typeof v === "string" ? (v === "none" ? "bez gumy" : HZ.bandName(v)) : v === 0 ? "bez ciężaru" : v == null || v === "" ? "?" : HZ.fmtKg(v) + " kg";
 HZ.targetBox = (ex, sets, onSet, idp, auto) => {
   const band = ex.type === "band";
   const work = sets.find(s => !s.warmup), warm = sets.filter(s => s.warmup);

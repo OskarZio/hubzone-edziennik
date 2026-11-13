@@ -11,7 +11,7 @@ window.HZ_FIREBASE = {
 // Dane administratora danych (RODO) — pokazują się w polityce prywatności. Uzupełnij e-mail kontaktowy.
 window.HZ_LEGAL = {
   controller: "Oskar Ziółkowski – Hubzone Weightlifting",
-  email: "UZUPELNIJ_EMAIL_KONTAKTOWY",
+  email: "oskarziolkowski25071@gmail.com",
   address: "",
   updated: "23 października 2026"
 };

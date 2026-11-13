@@ -136,7 +136,7 @@ function settingsView(){
         el("label", { class:"f", style:"grid-column:1/-1" }, "Kolor i skoki ciężaru", el("select", { id:`ex-k-${e.id || i}`, value:HZ.kindOf(e),
           onchange(ev){ e.kind = ev.target.value; if (e.kind === "heavy"){ e.incMin = 1.25; e.incMax = 2.5; } if (e.kind === "light"){ e.incMin = 2.5; e.incMax = 5; } render(); } },
           el("option", { value:"", text:"Bez koloru" }), el("option", { value:"heavy", text:"🟢 Ciężkie ćwiczenie – małe skoki (1,25–2,5 kg)" }), el("option", { value:"light", text:"🔴 Większe skoki (2,5–5 kg)" }))),
-        el("details", { class:"w1", style:"grid-column:1/-1", open: (e.warmStart || (e.warmBand && e.warmBand !== HZ.SCAP) || e.warmLabel || e.warmReps || e.warmKgScap) ? true : null },
+        el("details", { class:"w1", style:"grid-column:1/-1", open: (e.warmStart || (e.warmBand && e.warmBand !== HZ.SCAP) || e.warmLabel || e.warmReps || e.warmLabelBand || e.warmRepsBand || e.warmKgScap) ? true : null },
           el("summary", { text:"Seria wstępna W1 i ranking (ustalasz sam)" }),
           el("div", { class:"grid2", style:"margin-top:8px" },
             el("label", { class:"f" }, "Ciężar W1 (kg)", el("input", { id:`ex-ws-${e.id || i}`, inputmode:"decimal", value: e.warmStart ? HZ.fmtKg(e.warmStart) : "", placeholder:"np. 20 (gryf)", oninput(ev){ e.warmStart = HZ.parseNum(ev.target.value); } })),
@@ -152,8 +152,11 @@ function settingsView(){
             el("label", { class:"row small", style:"grid-column:1/-1;flex-wrap:nowrap;cursor:pointer;gap:6px" },
               el("input", { id:`ex-wk-${e.id || i}`, type:"checkbox", style:"width:auto", checked: e.warmKgScap || null, onchange(ev){ e.warmKgScap = ev.target.checked; } }),
               el("span", { text:"Przy ciężarze W1 też bez obciążenia (np. dipy: aktywacja łopatek)" })),
-            el("label", { class:"f" }, "Tekst W1 (zamiast ciężaru / gumy)", el("input", { id:`ex-wl-${e.id || i}`, maxlength:"40", value:e.warmLabel || "", placeholder:"np. podciąganie bez ciężaru", oninput(ev){ e.warmLabel = ev.target.value; } })),
-            el("label", { class:"f" }, "Powtórzenia W1", el("input", { id:`ex-wr-${e.id || i}`, maxlength:"10", value:e.warmReps || "", placeholder:"np. 6–8", oninput(ev){ e.warmReps = ev.target.value; } })))),
+            el("p", { class:"small muted", style:"grid-column:1/-1;margin:4px 0 0", text:"W1 opisujesz osobno dla osób bez gumy (ciężar / sama masa ciała) i dla osób na gumie – np. bez gumy: „podciąganie bez ciężaru”, na gumie: „aktywacja łopatek”." }),
+            el("label", { class:"f" }, "W1 bez gumy / z ciężarem: tekst", el("input", { id:`ex-wl-${e.id || i}`, maxlength:"40", value:e.warmLabel || "", placeholder:"np. podciąganie bez ciężaru", oninput(ev){ e.warmLabel = ev.target.value; } })),
+            el("label", { class:"f" }, "W1 bez gumy: powtórzenia", el("input", { id:`ex-wr-${e.id || i}`, maxlength:"10", value:e.warmReps || "", placeholder:"np. 3–5", oninput(ev){ e.warmReps = ev.target.value; } })),
+            el("label", { class:"f" }, "W1 na gumie: tekst", el("input", { id:`ex-wlb-${e.id || i}`, maxlength:"40", value:e.warmLabelBand || "", placeholder:"np. aktywacja łopatek", oninput(ev){ e.warmLabelBand = ev.target.value; } })),
+            el("label", { class:"f" }, "W1 na gumie: powtórzenia", el("input", { id:`ex-wrb-${e.id || i}`, maxlength:"10", value:e.warmRepsBand || "", placeholder:"np. 6–8", oninput(ev){ e.warmRepsBand = ev.target.value; } })))),
         el("label", { class:"f" }, "Skok ciężaru (kg)", el("div", { class:"row", style:"flex-wrap:nowrap;gap:4px" },
           el("select", { id:`ex-lo-${e.id || i}`, "aria-label":"Skok od", value:String(HZ.incRange(e)[0]), onchange(ev){ e.incMin = Number(ev.target.value); } }, [0.25,0.5,1,1.25,2,2.5,5,10].map(v => el("option", { value:String(v), text:HZ.fmtKg(v) }))),
           el("span", { text:"–" }),
@@ -232,7 +235,7 @@ function exOptions(w){
 }
 async function saveLibrary(c){
   const exercises = c.exercises.filter(e => e.name.trim()).map(e => ({ id:e.id || HZ.uuid(), name:e.name.trim().slice(0,80), type: e.modes === "kg" ? "kg" : e.modes === "band" ? "band" : e.type, modes: e.modes === "kg" || e.modes === "band" ? e.modes : "both", incMin:HZ.incRange(e)[0], incMax:HZ.incRange(e)[1], warmStart: Number(e.warmStart) > 0 ? Number(e.warmStart) : null,
-    warmBand: e.warmBand || HZ.SCAP, cat:(e.cat || "").trim().slice(0, 40), warmKgScap: !!e.warmKgScap, warmBandKg: !!e.warmBandKg, kind: HZ.kindOf(e), bwBased: e.bwBased ?? e.type === "band", warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10) }));
+    warmBand: e.warmBand || HZ.SCAP, cat:(e.cat || "").trim().slice(0, 40), warmKgScap: !!e.warmKgScap, warmBandKg: !!e.warmBandKg, kind: HZ.kindOf(e), bwBased: e.bwBased ?? e.type === "band", warmLabel:(e.warmLabel || "").trim().slice(0,40), warmReps:(e.warmReps || "").trim().replace(/-/g, "–").slice(0,10), warmLabelBand:(e.warmLabelBand || "").trim().slice(0,40), warmRepsBand:(e.warmRepsBand || "").trim().replace(/-/g, "–").slice(0,10) }));
   const bands = c.bands.filter(b => b.name.trim()).map(b => ({ id:b.id || HZ.uuid(), name:b.name.trim().slice(0,40), color:/^#[0-9a-f]{6}$/i.test(b.color) ? b.color : "#888888", kg: Number(b.kg) > 0 ? Math.round(Number(b.kg) * 10) / 10 : null, kgMax: Number(b.kgMax) > Number(b.kg) ? Math.round(Number(b.kgMax) * 10) / 10 : null }));
   const { error } = await HZ.api.saveLibrary({ exercises, bands });
   if (error){ toast(HZ.dbError(error)); return false; }
@@ -300,7 +303,7 @@ function workoutEditor(){
           el("div", { class:"grid3" },
             sec.key !== "main" ? null : el("label", { class:"f" }, "Serie wstępne", el("input", { id:`st-wu-${s.id}`, inputmode:"numeric", placeholder:"0", value: s.warmup ? String(s.warmup) : "", oninput(e){ s.warmup = Math.min(6, Math.max(0, Math.round(HZ.parseNum(e.target.value) || 0))); } })),
             el("label", { class:"f" }, "Serie robocze", el("input", { id:`st-s-${s.id}`, inputmode:"numeric", value:String(s.sets || ""), oninput(e){ s.sets = Math.round(HZ.parseNum(e.target.value) || 0); } })),
-            el("label", { class:"f" }, "Powtórzenia", el("input", { id:`st-r-${s.id}`, inputmode:"numeric", value:String(s.reps || ""), oninput(e){ s.reps = Math.round(HZ.parseNum(e.target.value) || 0); } })),
+            el("label", { class:"f" }, "Powtórzenia (np. 5 albo 6-8)", el("input", { id:`st-r-${s.id}`, inputmode:"text", value: HZ.stRange(s) ? `${s.reps}-${s.repsMax}` : String(s.reps || ""), placeholder:"np. 6-8", oninput(e){ const r = HZ.parseReps(e.target.value); s.reps = r.reps; s.repsMax = r.repsMax; } })),
             el("label", { class:"f" }, "RIR", el("select", { id:`st-rir-${s.id}`, value: s.rir != null ? String(s.rir) : "", onchange(e){ s.rir = e.target.value === "" ? null : Number(e.target.value); } },
               el("option", { value:"", text: w.rir != null ? `jak trening (${w.rir})` : "–" }), [0,1,2,3,4].map(n => el("option", { value:String(n), text:String(n) })))),
             el("label", { class:"f" }, sec.key === "main" ? "Czas" : "Czas na stacji", el("input", { id:`st-w-${s.id}`, maxlength:"30", value:s.work || "", placeholder:"np. 8 min", oninput(e){ s.work = e.target.value; } })),
@@ -316,7 +319,7 @@ function workoutEditor(){
       el("button", { class:"primary", async onclick(ev){
         if (!w.date){ toast("Wybierz datę."); return; } if (!w.stations.length){ toast("Dodaj przynajmniej jeden bój albo stację."); return; }
         const row = { ...(w.group ? { group:w.group } : {}), ...(w.open != null ? { open:w.open } : {}), ...(w.openedAt ? { openedAt:w.openedAt } : {}), ...(w.closedAt ? { closedAt:w.closedAt } : {}), id:w.id || HZ.uuid(), date:w.date, title:(w.title || "").trim(), note:(w.note || "").trim(), rir: w.rir ?? null,
-          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, rir: s.rir ?? null, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
+          stations:w.stations.filter(s => s.exId).map(s => ({ id:s.id, section:HZ.secOf(s), superset: HZ.secOf(s) !== "main" && !!s.superset, exId:s.exId, warmup: HZ.secOf(s) === "main" ? (s.warmup || 0) : 0, sets:s.sets || 3, reps:s.reps || 5, ...(HZ.stRange(s) ? { repsMax:s.repsMax } : {}), rir: s.rir ?? null, work:(s.work||"").trim(), rest:(s.rest||"").trim(), note:(s.note||"").trim() })) };
         ev.currentTarget.disabled = true;
         const { data, error } = await HZ.api.saveWorkout(row);
         if (error){ toast(HZ.dbError(error)); render(); return; }
@@ -413,7 +416,7 @@ async function openEntry(client, wid){
   A.entry = { client, w, d, logs }; render(); window.scrollTo(0, 0);
 }
 function entrySets(w, st, ex, mode, logs){
-  const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), ex.id, mode, ex, w.id, HZ.targetRir(w, st));
+  const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), ex.id, mode, ex, w.id, HZ.targetRir(w, st), HZ.stRange(st));
   return HZ.buildSets({ ...ex, type:mode }, HZ.secOf(st) === "main" ? (st.warmup || 0) : 0, st.sets || 3, sg.next ?? null);
 }
 function entryView(){
@@ -432,11 +435,11 @@ function entryView(){
       const ex = { ...exBase, type:mode };
       const sets = d.st[st.id] || (d.st[st.id] = entrySets(w, st, exBase, mode, logs));
       HZ.refreshWarmups(ex, sets);
-      const tRir = HZ.targetRir(w, st); const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), ex.id, mode, exBase, w.id, tRir);
+      const tRir = HZ.targetRir(w, st); const sg = HZ.suggest(HZ.dropRejected(logs, A.appr || {}), ex.id, mode, exBase, w.id, tRir, HZ.stRange(st));
       out.push(el("section", { class:"card station" + (isMain ? " main" : "") },
         el("div", { class:"row between", style:"align-items:flex-start" },
           el("div", { class:"stack", style:"gap:2px" }, el("span", { class:"eyebrow", text:labels[st.id] }), el("h3", { text:ex.name })),
-          el("div", { class:"row", style:"gap:4px" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${st.reps || "?"}` }), tRir != null ? el("span", { class:"badge rir", text:`RIR ${tRir}` }) : null)),
+          el("div", { class:"row", style:"gap:4px" }, el("span", { class:"badge", text:`${st.sets || "?"} × ${HZ.repsTxt(st)}` }), tRir != null ? el("span", { class:"badge rir", text:`RIR ${tRir}` }) : null)),
         HZ.modeToggle(mode, m => { d.mode[st.id] = m; d.st[st.id] = entrySets(w, st, exBase, m, logs); render(); }, exBase),
         HZ.tipBox(sg, load => { HZ.applyLoad(ex, sets, load); render(); }, (sets.find(s => !s.warmup) || {}).load),
         isMain && (mode === "kg" || mode === "band") && sets.some(s => s.warmup) ? HZ.targetBox(ex, sets, render, `en-${st.id}`) : null,
@@ -457,7 +460,7 @@ async function saveEntry(btn){
     const sets = (d.st[st.id] || []).filter(s => s.reps != null).map(s => ({ load: s.load === "" ? null : s.load ?? null, reps:s.reps, rir: s.warmup ? null : (s.rir ?? null), ...(s.warmup ? { warmup:true } : {}) }));
     const tRir = HZ.targetRir(w, st);
     if (sets.length) entries.push({ stationId:st.id, exId:ex.id, exName:ex.name, type:d.mode[st.id] || ex.type, ...(tRir != null ? { targetRir:tRir } : {}),
-      targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.reps || 0, sets }); }
+      targetSets:st.sets || sets.filter(x => !x.warmup).length, targetReps:st.repsMax || st.reps || 0, ...(HZ.stRange(st) ? { repsMin:st.reps } : {}), sets }); }
   if (!entries.length){ toast("Wpisz powtórzenia przynajmniej w jednej serii."); return; }
   btn.disabled = true;
   const row = { user_id:client.id, workout_id:w.id, date:w.date, title:w.title || "", own:false, fatigue:d.fatigue ?? null, note:(d.note || "").trim().slice(0,1000), entries, saved_at:new Date().toISOString() };
