@@ -566,12 +566,13 @@ function consentGate(){
 
 /* ---------- account ---------- */
 function bwForm(hint){
-  const inp = el("input", { id:"acc-bw", inputmode:"decimal", placeholder:"np. 78,5", value: C.profile && C.profile.bodyweight ? HZ.fmtKg(C.profile.bodyweight) : "", style:"text-align:center" });
-  const hasHealth = !!(C.profile.consent && C.profile.consent.health);
+  const F = C.bwForm || (C.bwForm = {});   // what the person typed survives re-renders (ranking refresh, live updates…)
+  const inp = el("input", { id:"acc-bw", inputmode:"decimal", placeholder:"np. 78,5", value: F.bw != null ? F.bw : C.profile && C.profile.bodyweight ? HZ.fmtKg(C.profile.bodyweight) : "", style:"text-align:center", oninput(e){ F.bw = e.target.value; } });
+  const hasHealth = F.health != null ? F.health : !!(C.profile.consent && C.profile.consent.health);
   const yNow = new Date().getFullYear();
-  const byIn = el("input", { id:"acc-by", inputmode:"numeric", maxlength:"4", placeholder:"np. 1990", value: C.profile.birthYear ? String(C.profile.birthYear) : "", style:"text-align:center" });
-  const sxIn = el("select", { id:"acc-sex", "aria-label":"Płeć", value:C.profile.sex || "" }, el("option", { value:"", text:"–" }), el("option", { value:"K", text:"Kobieta" }), el("option", { value:"M", text:"Mężczyzna" }));
-  const hc = el("input", { id:"acc-health", type:"checkbox", style:"width:auto;margin-top:3px", checked: hasHealth || null });
+  const byIn = el("input", { id:"acc-by", inputmode:"numeric", maxlength:"4", placeholder:"np. 1990", value: F.by != null ? F.by : C.profile.birthYear ? String(C.profile.birthYear) : "", style:"text-align:center", oninput(e){ F.by = e.target.value; } });
+  const sxIn = el("select", { id:"acc-sex", "aria-label":"Płeć", value: F.sex != null ? F.sex : C.profile.sex || "", onchange(e){ F.sex = e.target.value; } }, el("option", { value:"", text:"–" }), el("option", { value:"K", text:"Kobieta" }), el("option", { value:"M", text:"Mężczyzna" }));
+  const hc = el("input", { id:"acc-health", type:"checkbox", checked: hasHealth || null, onchange(e){ F.health = e.target.checked; } });
   const bw = C.profile.bodyweight, st = bw ? HZ.computeStats(C.logs, C.appr) : null, rel = bw ? HZ.relStrength(st.bests, bw, st.assist) : {};
   const relTxt = Object.entries(rel).map(([id, v]) => ({ n:(HZ.exById(id) || {}).name, v })).filter(x => x.n).sort((a, b) => b.v - a.v).slice(0, 4).map(x => `${x.n} ${x.v}%`).join(" · ");
   return el("div", { class:"stack", style:"gap:6px" }, hint ? el("p", { class:"small", text:hint }) : null,
@@ -593,7 +594,7 @@ function bwForm(hint){
         if (!error) C.profile.consent = consent;
         ev.currentTarget.disabled = false;
         if (error){ toast(error.code === "permission-denied" ? "Nie udało się zapisać: trener musi zaktualizować reguły bazy." : HZ.dbError(error)); return; }
-        C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; C.profile.birthYear = by; C.profile.sex = sxIn.value || null; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
+        C.profile.bodyweight = v == null ? null : Math.round(v * 10) / 10; C.profile.birthYear = by; C.profile.sex = sxIn.value || null; C.bwForm = {}; syncRanking(); toast(v == null ? "Usunięto masę ciała" : "Zapisano masę ciała"); render(); }, text:"Zapisz" })));
 }
 /* profile picture (shown on the podium and in the ranking) */
 function photoCard(){

@@ -613,3 +613,6 @@ button.rt-btn{min-height:40px;min-width:40px;padding:6px 10px;border-radius:12px
 details > summary{cursor:pointer}
 @media (prefers-color-scheme: dark){ :root:not([data-theme="light"]) .rest-timer:not(.done){background:#26333F} }
 :root[data-theme="dark"] .rest-timer:not(.done){background:#26333F}
+/* checkboxes / radios: fixed, easy-to-tap size (never squeezed by long text next to them) */
+input[type=checkbox],input[type=radio]{flex:none;width:22px!important;height:22px;min-width:22px;padding:0;margin:1px 0 0;accent-color:var(--accent);cursor:pointer;box-shadow:none}
+label:has(> input[type=checkbox]),label:has(> input[type=radio]){cursor:pointer}
