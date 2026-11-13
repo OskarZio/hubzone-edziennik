@@ -13,5 +13,5 @@ window.HZ_LEGAL = {
   controller: "Oskar Ziółkowski – Hubzone Weightlifting",
   email: "oskarziolkowski25071@gmail.com",
   address: "",
-  updated: "23 października 2026"
+  updated: "13 listopada 2026"
 };

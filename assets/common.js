@@ -33,7 +33,7 @@ const googleErr = e => { if (e && e.code === "auth/operation-not-allowed") e.cod
 HZ.ready = !!db;
 const wrap = async fn => { try { return { data: await fn(), error:null }; } catch(e){ console.error(e); return { data:null, error:e }; } };
 const list = s => s.docs.map(d => ({ id:d.id, ...d.data() }));
-const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, sex: d.sex === "K" || d.sex === "M" ? d.sex : null, created_at:d.createdAt || null, consent: d.consent || null, photo: typeof d.photo === "string" && d.photo.startsWith("data:image/jpeg;base64,") ? d.photo : null } : null;
+const asProfile = (id, d) => d ? { id, name:d.name || "", email:d.email || "", is_admin:d.isAdmin === true, manual:d.manual === true, guest:d.guest === true, advanced:d.advanced === true, progression: ["fast","slow"].includes(d.progression) ? d.progression : "std", task:(d.task || "").slice(0, 300), bodyweight: Number(d.bodyweight) > 0 ? Number(d.bodyweight) : null, birthYear: Number(d.birthYear) > 1900 ? Number(d.birthYear) : null, sex: d.sex === "K" || d.sex === "M" ? d.sex : null, created_at:d.createdAt || null, consent: d.consent || null, photo: typeof d.photo === "string" && d.photo.startsWith("data:image/jpeg;base64,") ? d.photo : null, goals: Array.isArray(d.goals) ? d.goals : [] } : null;
 HZ.consentOk = p => !!(p && p.consent && p.consent.policy === HZ.POLICY_VERSION && p.consent.age16 === true);
 HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toISOString(), age16:!!(prev && prev.age16), ranking:!!(prev && prev.ranking), health:!!(prev && prev.health), ...patch });
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
@@ -79,21 +79,48 @@ HZ.api = {
   exportMyData: uid => wrap(async () => {
     const [p, l, r] = await Promise.all([db.doc("users/" + uid).get(), db.collection("logs").where("user_id", "==", uid).get(), db.doc("ranking/" + uid).get()]);
     const profile = p.exists ? { ...p.data() } : null; if (profile) delete profile.joinCode;
+    const fb = await db.collection("feedback").where("user_id", "==", uid).get().catch(() => ({ docs:[] })), rec = await db.doc("records/" + uid).get().catch(() => null);
     return { exportedAt:new Date().toISOString(), app:"Hubzone Weightlifting e-Dziennik", account:{ uid, email: auth.currentUser && auth.currentUser.email },
-      profile, trainingLogs:list(l), ranking: r.exists ? r.data() : null };
+      profile, trainingLogs:list(l), ranking: r.exists ? r.data() : null, trainerComments:list(fb), records: rec && rec.exists ? rec.data().list || [] : [] };
   }),
   deleteMyAccount: (uid, password) => wrap(async () => {
     const u = auth.currentUser; if (!u || u.uid !== uid) throw { code:"auth/no-current-user" };
     if (!u.isAnonymous) await u.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(u.email, password));
     await delWhere("user_id", uid);
-    for (const c of ["drafts", "ideas"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {});
+    for (const c of ["drafts", "ideas", "feedback"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {});
+    await db.doc("records/" + uid).delete().catch(() => {});
     await db.doc("ranking/" + uid).delete().catch(() => {});
     await db.doc("users/" + uid).delete();
     await u.delete().catch(e => { if (!u.isAnonymous) throw e; return auth.signOut(); });
   }),
   deleteClientData: uid => wrap(async () => { const n = await delWhere("user_id", uid);
     await db.doc("plans/" + uid).delete().catch(() => {});
-    for (const c of ["drafts", "approvals", "technique", "ideas"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
+    await db.doc("records/" + uid).delete().catch(() => {});
+    for (const c of ["drafts", "approvals", "technique", "ideas", "feedback"]) for (const d of (await db.collection(c).where("user_id", "==", uid).get().catch(() => ({ docs:[] }))).docs) await d.ref.delete().catch(() => {}); await db.doc("ranking/" + uid).delete().catch(() => {}); await db.doc("users/" + uid).delete(); return n; }),
+  /* trainer's comment to a result (one per training log) */
+  feedbackOf: uid => wrap(async () => list(await db.collection("feedback").where("user_id", "==", uid).get())),
+  allFeedback: () => wrap(async () => list(await db.collection("feedback").get())),
+  setFeedback: (logId, uid, wid, text) => wrap(() => text ? db.doc("feedback/" + logId).set({ user_id:uid, workout_id:wid || null, text:text.slice(0, 500), at:new Date().toISOString() }) : db.doc("feedback/" + logId).delete()),
+  /* goals (client or trainer), records written by the trainer */
+  setGoals: (uid, goals) => wrap(() => db.doc("users/" + uid).update({ goals })),
+  recordsOf: uid => wrap(async () => { const s = await db.doc("records/" + uid).get(); return s.exists ? (s.data().list || []) : []; }),
+  setRecords: (uid, list) => wrap(() => db.doc("records/" + uid).set({ list })),
+  /* sign-ups for a class with a seat limit */
+  signups: wid => wrap(async () => { const s = await db.doc("signups/" + wid).get(); return s.exists ? { uids:s.data().uids || [], names:s.data().names || {} } : { uids:[], names:{} }; }),
+  allSignups: () => wrap(async () => Object.fromEntries((await db.collection("signups").get()).docs.map(d => [d.id, { uids:d.data().uids || [], names:d.data().names || {} }]))),
+  setSignup: (wid, uid, name, on) => wrap(async () => { const ref = db.doc("signups/" + wid), s = await ref.get(), cur = s.exists ? s.data() : { uids:[], names:{} };
+    const uids = (cur.uids || []).filter(x => x !== uid), names = { ...(cur.names || {}) }; delete names[uid];
+    if (on){ uids.push(uid); names[uid] = (name || "").slice(0, 60); }
+    await ref.set({ uids, names }); return { uids, names }; }),
+  /* trainer: workout templates, club settings in the library doc, full backup */
+  templates: () => wrap(async () => { const s = await db.doc("settings/templates").get(); return s.exists ? (s.data().list || []) : []; }),
+  saveTemplates: list => wrap(() => db.doc("settings/templates").set({ list })),
+  setLibraryField: obj => wrap(() => db.doc("config/library").set(obj, { merge:true })),
+  backup: () => wrap(async () => { const out = { exportedAt:new Date().toISOString(), app:"Hubzone Weightlifting e-Dziennik" };
+    for (const c of ["users", "logs", "workouts", "config", "ranking", "plans", "attendance", "approvals", "technique", "feedback", "records", "signups", "drafts", "ideas", "settings"])
+      out[c] = list(await db.collection(c).get().catch(() => ({ docs:[] })));
+    if (out.settings) out.settings = out.settings.map(d => d.id === "club" ? { id:d.id, note:"kod klubu pominięty" } : d);
+    return out; }),
   setPhoto: (uid, photo) => wrap(() => db.doc("users/" + uid).update({ photo: photo || null })),
   updateName: (uid, name) => wrap(() => db.doc("users/" + uid).update({ name })),
   updateProfile: (uid, patch) => wrap(() => db.doc("users/" + uid).update(patch)),
@@ -317,7 +344,8 @@ HZ.fmtLoad = (type, load) => { if (type === "band") return load ? HZ.bandName(lo
 HZ.loadConfig = async () => {
   const s = await db.doc("config/library").get(); const d = s.exists ? s.data() : {};
   S.config = { exercises:(d.exercises || []).map(e => ({ ...e, type: e.type === "band" ? "band" : "kg", inc:Number(e.inc) || 0 })), bands:d.bands || [], ownEnabled:d.ownEnabled === true, rankingEnabled:d.rankingEnabled !== false,
-    features:{ rir:"off", acc:"all", pain:"off", approve:false, approveSince:null, requireStart:false, holo:true, groups:false, custom:false, ...(d.features || {}) }, groups:d.groups || [], guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0 };
+    features:{ badges:true, goals:false, signups:false, rir:"off", acc:"all", pain:"off", approve:false, approveSince:null, requireStart:false, holo:true, groups:false, custom:false, ...(d.features || {}) }, groups:d.groups || [], guestLimit: Number(d.guestLimit) > 0 ? Number(d.guestLimit) : 0,
+    announce: d.announce && d.announce.text ? d.announce : null, schedule: d.schedule && d.schedule.time ? d.schedule : null };
 };
 /* client features: "off" | "adv" (only clients marked as advanced) | "all"; the trainer's client view shows exactly what clients see */
 HZ.feat = (name, profile) => { const v = ((S.config && S.config.features) || {})[name];
@@ -1353,4 +1381,140 @@ HZ.resetPassword = email => auth.sendPasswordResetEmail(email);
 
 HZ.setupNeeded = () => [el("div", { class:"card" }, el("h2", { text:"Aplikacja nie jest jeszcze podłączona" }),
   el("p", { text:"Uzupełnij dane projektu Firebase w pliku config.js. Instrukcja jest w README." }))];
+})();
+
+/* =====================================================================
+   Nov 2026 features: badges, goals, records, calendar, comfort settings
+   ===================================================================== */
+(function(){
+const { el } = HZ, S = HZ.S;
+/* comfort: bigger text / simple mode (per phone) */
+HZ.ux = () => HZ.LS.get("hz-ux") || {};
+HZ.applyUx = () => { const u = HZ.ux(), r = document.documentElement; r.classList.toggle("ux-big", !!u.big); r.classList.toggle("ux-simple", !!u.simple); };
+HZ.applyUx();
+HZ.uxCard = rerender => { const u = HZ.ux();
+  const tog = (k, title, sub) => el("label", { class:"row consent", style:"flex-wrap:nowrap;align-items:flex-start;gap:10px" },
+    el("input", { id:"ux-" + k, type:"checkbox", checked: u[k] || null, onchange(e){ HZ.LS.set("hz-ux", { ...HZ.ux(), [k]: e.target.checked }); HZ.applyUx(); rerender(); } }),
+    el("span", { class:"stack", style:"gap:2px" }, el("b", { text:title }), el("span", { class:"small muted", text:sub })));
+  return el("div", { class:"stack", style:"gap:12px" },
+    tog("big", "Większy tekst", "Wszystko w aplikacji jest większe i łatwiejsze do przeczytania."),
+    tog("simple", "Tryb prosty", "Tylko to, co potrzebne na treningu: ciężar, powtórzenia i wysyłanie. Bez opisów podpowiedzi, kalkulatora rozgrzewki i dodatków.")); };
+
+/* when the person typed the best set: work sets in a given mode */
+const workSets = (logs, exId, mode) => { const out = [];
+  for (const l of [...logs].sort((a, b) => (a.date || "").localeCompare(b.date || ""))) for (const e of l.entries || [])
+    if (e.exId === exId && (!mode || (e.type || "kg") === mode)) for (const s of e.sets || []) if (!s.warmup && s.reps > 0) out.push({ ...s, date:l.date, type:e.type || "kg" });
+  return out; };
+const bandRank = v => v === "none" ? S.config.bands.length : HZ.bandIdx(v);   // higher = weaker band = better
+
+/* ---------- badges ---------- */
+HZ.badgeList = logs => {
+  const club = logs.filter(l => !l.own && l.workout_id), n = club.length, today = HZ.todayISO();
+  const mine = new Set(club.map(l => l.workout_id)), past = HZ.sortedWorkouts().filter(w => w.date < today || mine.has(w.id));   // today's class counts once you were there
+  let run = 0, best = 0; for (const w of past){ if (mine.has(w.id)){ run++; best = Math.max(best, run); } else run = 0; }
+  const months = {}; for (const w of past){ const k = w.date.slice(0, 7); (months[k] = months[k] || { all:0, me:0 }).all++; if (mine.has(w.id)) months[k].me++; }
+  const fullMonth = Object.entries(months).some(([k, m]) => k < today.slice(0, 7) && m.all >= 3 && m.me === m.all);
+  let pr = false, noBand = false;
+  for (const ex of S.config.exercises){ const kg = workSets(logs, ex.id, "kg").filter(s => typeof s.load === "number");
+    let top = -1; kg.forEach((s, i) => { if (i && s.load > top && top > 0) pr = true; top = Math.max(top, s.load); });
+    if (workSets(logs, ex.id, "band").some(s => s.load === "none")) noBand = true; }
+  return [
+    { ic:"🎯", name:"Pierwszy trening", got:n >= 1, hint:"Wyślij wyniki z pierwszego treningu" },
+    { ic:"🔥", name:"5 treningów", got:n >= 5, hint:`${Math.min(n, 5)}/5 treningów` },
+    { ic:"💪", name:"10 treningów", got:n >= 10, hint:`${Math.min(n, 10)}/10 treningów` },
+    { ic:"🏅", name:"25 treningów", got:n >= 25, hint:`${Math.min(n, 25)}/25 treningów` },
+    { ic:"👑", name:"50 treningów", got:n >= 50, hint:`${Math.min(n, 50)}/50 treningów` },
+    { ic:"📅", name:"4 zajęcia z rzędu", got:best >= 4, hint:`Najdłuższa seria: ${best} z rzędu` },
+    { ic:"✅", name:"Cały miesiąc", got:fullMonth, hint:"Bądź na wszystkich zajęciach w miesiącu" },
+    { ic:"📈", name:"Pierwszy rekord", got:pr, hint:"Podnieś więcej niż kiedykolwiek wcześniej" },
+    { ic:"🦅", name:"Bez gumy", got:noBand, hint:"Zrób serię bez gumy w ćwiczeniu z gumą" }];
+};
+HZ.badgesCard = logs => { const list = HZ.badgeList(logs), got = list.filter(b => b.got).length;
+  return el("div", { class:"card" }, el("div", { class:"row between" }, el("h3", { text:"Odznaki" }), el("span", { class:"small muted", text:`${got} z ${list.length}` })),
+    el("div", { class:"badges" }, list.map(b => el("div", { class:"bdg" + (b.got ? " got" : ""), title:b.hint },
+      el("span", { class:"bdg-ic", "aria-hidden":"true", text:b.ic }), el("b", { text:b.name }), el("span", { class:"small muted", text: b.got ? "zdobyta" : b.hint }))))); };
+
+/* ---------- goals ---------- */
+HZ.goalProgress = (g, logs) => {
+  const ex = HZ.exById(g.exId); if (!ex) return null;
+  if (g.kind === "band"){ const sets = workSets(logs, g.exId, "band"); if (!sets.length) return { pct:0, now:"jeszcze brak wpisów", done:false };
+    const first = bandRank(sets[0].load), bestS = sets.reduce((a, s) => bandRank(s.load) > bandRank(a.load) ? s : a, sets[0]), tgt = bandRank(g.target);
+    const pct = bandRank(bestS.load) >= tgt ? 1 : tgt > first ? (bandRank(bestS.load) - first) / (tgt - first) : 0;
+    return { pct:Math.max(0, Math.min(1, pct)), now:`teraz: ${HZ.loadName({ type:"band" }, bestS.load)}`, done: bandRank(bestS.load) >= tgt }; }
+  if (g.kind === "reps"){ const sets = workSets(logs, g.exId); const best = sets.reduce((a, s) => Math.max(a, s.reps || 0), 0);
+    return { pct:Math.min(1, best / (g.target || 1)), now:`najwięcej: ${best} powt.`, done: best >= g.target }; }
+  const sets = workSets(logs, g.exId, "kg").filter(s => typeof s.load === "number"); if (!sets.length) return { pct:0, now:"jeszcze brak wpisów", done:false };
+  const start = sets[0].load, best = Math.max(...sets.map(s => s.load)), t = Number(g.target) || 0;
+  return { pct: best >= t ? 1 : t > start ? Math.max(0, (best - start) / (t - start)) : 0, now:`najwięcej: ${HZ.fmtKg(best)} kg`, done: best >= t };
+};
+HZ.goalText = g => { const ex = HZ.exById(g.exId) || {}; return `${ex.name || "Ćwiczenie"}: ` + (g.kind === "band" ? (g.target === "none" ? "bez gumy" : HZ.bandFull(g.target)) : g.kind === "reps" ? `${g.target} powtórzeń w serii` : `${HZ.fmtKg(g.target)} kg`); };
+/* goals card: list with progress bars + (optional) add form. onSave(newList) persists. */
+HZ.goalsCard = (goals, logs, onSave, opts = {}) => {
+  const st = HZ.goalsCard.st = HZ.goalsCard.st || {}; const key = opts.key || "me"; const f = st[key] = st[key] || { open:false };
+  const rows = (goals || []).map((g, i) => { const p = HZ.goalProgress(g, logs) || { pct:0, now:"" };
+    return el("div", { class:"goal" + (p.done ? " done" : "") },
+      el("div", { class:"row between", style:"flex-wrap:nowrap;gap:8px" }, el("b", { text:(p.done ? "✓ " : "") + HZ.goalText(g) }),
+        onSave ? el("button", { type:"button", class:"ghost small", "aria-label":"Usuń cel", onclick(){ onSave(goals.filter((_, j) => j !== i)); }, text:"✕" }) : null),
+      el("div", { class:"gbar", role:"progressbar", "aria-valuemin":"0", "aria-valuemax":"100", "aria-valuenow":String(Math.round(p.pct * 100)) }, el("span", { style:`width:${Math.round(p.pct * 100)}%` })),
+      el("span", { class:"small muted", text:`${p.now}${g.by === "coach" ? " · cel od trenera" : ""}${p.done ? " · cel osiągnięty!" : ` · ${Math.round(p.pct * 100)}%`}` })); });
+  const exs = S.config.exercises.filter(e => e.name && e.name.trim());
+  let form = null;
+  if (onSave && f.open){ const ex = HZ.exById(f.exId) || exs[0]; if (ex && !f.exId) f.exId = ex.id;
+    const kinds = ex ? HZ.modesOf(ex).map(m => m === "band" ? ["band", "Guma"] : ["kg", "Ciężar (kg)"]).concat([["reps", "Powtórzenia"]]) : [];
+    if (!f.kind || !kinds.some(k => k[0] === f.kind)) f.kind = kinds[0] ? kinds[0][0] : "kg";
+    const tgt = f.kind === "band" ? el("select", { id:`goal-t-${key}`, value:f.target || "none", onchange(e){ f.target = e.target.value; } }, el("option", { value:"none", text:"Bez gumy" }), S.config.bands.map(b => el("option", { value:b.id, text:b.name })))
+      : el("input", { id:`goal-t-${key}`, inputmode:"decimal", placeholder: f.kind === "reps" ? "np. 10" : "np. 60", value:f.target || "", oninput(e){ f.target = e.target.value; } });
+    form = el("div", { class:"stack goal-form" },
+      el("label", { class:"f" }, "Ćwiczenie", el("select", { id:`goal-ex-${key}`, value:f.exId, onchange(e){ f.exId = e.target.value; f.kind = null; f.target = ""; opts.rerender(); } }, exs.map(e => el("option", { value:e.id, text:e.name })))),
+      el("div", { class:"grid2" }, el("label", { class:"f" }, "Rodzaj celu", el("select", { id:`goal-k-${key}`, value:f.kind, onchange(e){ f.kind = e.target.value; f.target = ""; opts.rerender(); } }, kinds.map(([v, t]) => el("option", { value:v, text:t })))),
+        el("label", { class:"f" }, f.kind === "band" ? "Cel" : f.kind === "reps" ? "Powtórzeń w serii" : "Ciężar (kg)", tgt)),
+      el("div", { class:"row" }, el("button", { class:"primary", onclick(){ const t = f.kind === "band" ? (f.target || "none") : HZ.parseNum(f.target);
+          if (f.kind !== "band" && !(t > 0)){ HZ.toast("Wpisz wartość celu"); return; }
+          onSave([...(goals || []), { id:HZ.uuid().slice(0, 8), exId:f.exId, kind:f.kind, target:t, by:opts.by || "me", at:HZ.todayISO() }].slice(-8)); st[key] = { open:false }; }, text:"Dodaj cel" }),
+        el("button", { class:"ghost", onclick(){ f.open = false; opts.rerender(); }, text:"Anuluj" }))); }
+  return el("div", { class:"card" }, el("h3", { text: opts.title || "Cele" }),
+    rows.length ? el("div", { class:"stack", style:"gap:12px" }, rows) : el("p", { class:"small muted", text: opts.empty || "Ustaw cel, np. podciąganie bez gumy albo 60 kg w przysiadzie – zobaczysz, ile już masz." }),
+    form || (onSave && (goals || []).length < 8 ? el("button", { style:"align-self:flex-start", onclick(){ f.open = true; opts.rerender(); }, text:"+ Dodaj cel" }) : null));
+};
+
+/* ---------- records from the trainer ---------- */
+HZ.recordsCard = (list, opts = {}) => (list && list.length) || opts.edit ? el("div", { class:"card" }, el("h3", { text: opts.title || "Rekordy (wpisane przez trenera)" }),
+  list && list.length ? el("div", { class:"list" }, [...list].sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(r => el("div", { class:"row between rec", style:"flex-wrap:nowrap" },
+    el("span", {}, el("b", { text:(HZ.exById(r.exId) || {}).name || r.exName || "Ćwiczenie" }), el("span", { text:" · " + r.value })),
+    el("span", { class:"row", style:"gap:6px;flex-wrap:nowrap" }, el("span", { class:"small muted", text:HZ.fmtDate(r.date) }), opts.onDelete ? el("button", { class:"ghost small", "aria-label":"Usuń rekord", onclick(){ opts.onDelete(r); }, text:"✕" }) : null)))) : el("p", { class:"small muted", text:"Brak rekordów." }),
+  opts.edit || null) : null;
+
+/* ---------- calendar (.ics): weekly class with a reminder 2 h before ---------- */
+HZ.icsDownload = sch => {
+  const DAY = ["SU","MO","TU","WE","TH","FR","SA"], [hh, mm] = String(sch.time || "18:00").split(":").map(Number), dur = Number(sch.dur) || 60;
+  const d = new Date(); d.setDate(d.getDate() + ((Number(sch.day) - d.getDay() + 7) % 7)); const p = n => String(n).padStart(2, "0");
+  const ymd = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`, end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), hh, mm + dur);
+  const ics = ["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Hubzone//e-Dziennik//PL","CALSCALE:GREGORIAN","BEGIN:VEVENT",`UID:hubzone-${ymd}-${hh}${mm}@hubzone`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").slice(0, 15)}Z`,
+    `DTSTART;TZID=Europe/Warsaw:${ymd}T${p(hh)}${p(mm)}00`, `DTEND;TZID=Europe/Warsaw:${end.getFullYear()}${p(end.getMonth() + 1)}${p(end.getDate())}T${p(end.getHours())}${p(end.getMinutes())}00`,
+    `RRULE:FREQ=WEEKLY;BYDAY=${DAY[Number(sch.day) || 5]}`, "SUMMARY:Trening Hubzone Weightlifting", sch.place ? `LOCATION:${String(sch.place).replace(/[,;\n]/g, " ")}` : null,
+    `DESCRIPTION:Wpisz wyniki w e-Dzienniku: ${location.origin}${location.pathname.replace(/admin\.html$/, "")}`,
+    "BEGIN:VALARM","ACTION:DISPLAY","DESCRIPTION:Trening za 2 godziny","TRIGGER:-PT2H","END:VALARM","END:VEVENT","END:VCALENDAR"].filter(Boolean).join("\r\n");
+  const a = el("a", { href:URL.createObjectURL(new Blob([ics], { type:"text/calendar" })), download:"trening-hubzone.ics" }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
+HZ.DAY_NAMES = ["niedziela","poniedziałek","wtorek","środa","czwartek","piątek","sobota"];
+HZ.reminderCard = () => { const s = S.config.schedule; if (!s) return null;
+  return el("div", { class:"card" }, el("h3", { text:"Przypomnienie o zajęciach" }),
+    el("p", { class:"small muted", text:`Zajęcia: ${HZ.DAY_NAMES[Number(s.day)]}, ${s.time}${s.place ? " · " + s.place : ""}. Dodaj je do kalendarza w telefonie – przypomni Ci 2 godziny przed treningiem.` }),
+    el("button", { style:"align-self:flex-start", onclick(){ HZ.icsDownload(s); }, text:"📅 Dodaj do kalendarza" })); };
+
+/* ---------- announcement from the trainer ---------- */
+HZ.announceBar = (closable = true) => { const a = S.config.announce; if (!a || !a.text) return null;
+  if (a.until && a.until < HZ.todayISO()) return null;
+  const k = "hz-ann-" + (a.at || a.text).slice(0, 40); if (closable && HZ.LS.get(k)) return null;
+  return el("div", { class:"announce", role:"status" }, el("span", { class:"ann-ic", "aria-hidden":"true", text:"📢" }), el("div", { class:"stack", style:"gap:2px;flex:1;min-width:0" }, el("b", { text:"Od trenera" }), el("span", { style:"white-space:pre-wrap", text:a.text })),
+    closable ? el("button", { type:"button", class:"ghost", "aria-label":"Zamknij ogłoszenie", onclick(e){ HZ.LS.set(k, true); e.currentTarget.closest(".announce").remove(); }, text:"✕" }) : null); };
+
+/* ---------- CSV export (opens in Excel; ; separated, with BOM for Polish letters) ---------- */
+HZ.csvDownload = (name, rows) => { const esc = v => { const s = v == null ? "" : String(v); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csv = "﻿" + rows.map(r => r.map(esc).join(";")).join("\r\n");
+  const a = el("a", { href:URL.createObjectURL(new Blob([csv], { type:"text/csv;charset=utf-8" })), download:name }); document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); };
+HZ.logsCsvRows = (logs, nameOf) => { const rows = [["Data", "Osoba", "Trening", "Ćwiczenie", "Tryb", "Seria", "Ciężar / guma", "Powtórzenia", "RIR", "Zmęczenie", "Notatka"]];
+  for (const l of [...logs].sort((a, b) => (a.date || "").localeCompare(b.date || ""))) for (const e of l.entries || []){ let wn = 0, rn = 0;
+    for (const s of e.sets || []) rows.push([l.date, nameOf(l.user_id), l.own ? "własny" : (l.title || ""), e.exName || (HZ.exById(e.exId) || {}).name || "", e.type === "band" ? "guma" : "kg", s.warmup ? "W" + (++wn) : String(++rn),
+      typeof s.load === "number" ? String(s.load).replace(".", ",") : s.load ? HZ.loadName({ type:e.type }, s.load) : "", s.reps ?? "", s.rir ?? "", l.fatigue ?? "", (l.note || "").replace(/\s+/g, " ")]); }
+  return rows; };
 })();

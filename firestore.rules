@@ -60,7 +60,8 @@ service cloud.firestore {
             && (!exists(club()) || request.resource.data.joinCode == get(club()).data.joinCode));
       // klient: imię, masa ciała, zgody. Trener: to samo dla klientów (np. masa ciała za zgodą ustną). Rola trenera tylko ręcznie w konsoli.
       allow update: if signedIn() && (request.auth.uid == uid || (isAdmin() && resource.data.get('isAdmin', false) != true))
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent', 'email', 'guest', 'convertedAt', 'birthYear', 'sex', 'photo'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'bodyweight', 'consent', 'email', 'guest', 'convertedAt', 'birthYear', 'sex', 'photo', 'goals'])
+        && (request.resource.data.get('goals', []) is list && request.resource.data.get('goals', []).size() <= 8)
         && validPhoto(request.resource.data)
         && request.resource.data.get('sex', null) in [null, 'K', 'M']
         && (request.resource.data.get('birthYear', null) == null || (request.resource.data.birthYear is int && request.resource.data.birthYear >= 1920 && request.resource.data.birthYear <= 2012))
@@ -184,6 +185,38 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['user_id', 'name', 'text', 'at'])
         && request.resource.data.text is string && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 1000
         && request.resource.data.name is string && request.resource.data.name.size() <= 60 && request.resource.data.at is string;
+    }
+
+    // Komentarz trenera do wyniku: zapisuje trener, klient widzi (i może usunąć) swoje.
+    match /feedback/{id} {
+      allow read, delete: if signedIn() && (resource.data.user_id == request.auth.uid || isAdmin());
+      allow write: if isAdmin() && request.resource.data.text is string && request.resource.data.text.size() <= 500;
+    }
+
+    // Rekordy wpisane przez trenera: klient widzi swoje.
+    match /records/{uid} {
+      allow read, delete: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow write: if isAdmin() && isClient(uid) && request.resource.data.list is list && request.resource.data.list.size() <= 50;
+    }
+
+    // Zapisy na zajęcia z limitem miejsc: każdy dopisuje lub wypisuje tylko siebie, limit pilnowany tutaj.
+    function seatsOk(wid) {
+      let lim = get(/databases/$(database)/documents/workouts/$(wid)).data.get('limit', 0);
+      return lim == 0 || request.resource.data.uids.size() <= lim;
+    }
+    match /signups/{wid} {
+      allow read: if isMember();
+      allow write: if isAdmin();
+      allow create: if isMember() && exists(/databases/$(database)/documents/workouts/$(wid))
+        && request.resource.data.keys().hasOnly(['uids', 'names'])
+        && request.resource.data.uids == [request.auth.uid]
+        && request.resource.data.names.keys().hasOnly([request.auth.uid])
+        && seatsOk(wid);
+      allow update: if isMember()
+        && request.resource.data.keys().hasOnly(['uids', 'names'])
+        && request.resource.data.uids.toSet().difference(resource.data.uids.toSet()).union(resource.data.uids.toSet().difference(request.resource.data.uids.toSet())) == [request.auth.uid].toSet()
+        && request.resource.data.names.diff(resource.data.names).affectedKeys().hasOnly([request.auth.uid])
+        && (request.resource.data.uids.size() < resource.data.uids.size() || seatsOk(wid));
     }
 
     // Ocena techniki: tylko trener.
