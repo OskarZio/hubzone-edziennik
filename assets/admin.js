@@ -8,10 +8,7 @@ const A = { session:null, profile:null, checked:false, authMode:"login", tab:HZ.
 
 function render(){ HZ.swap(app, view(), A.session ? A.tab + (A.showQr ? "-qr" : "") : "pre"); }
 
-/* security: the trainer panel signs out after 30 min without activity */
-const IDLE_MS = 30 * 60 * 1000; let idleTimer = null;
-function armIdle(){ clearTimeout(idleTimer); if (A.session) idleTimer = setTimeout(async () => { await HZ.api.signOut(); toast("Wylogowano po 30 min bezczynności."); }, IDLE_MS); }
-["pointerdown","keydown","scroll","visibilitychange"].forEach(ev => document.addEventListener(ev, armIdle, { passive:true }));
+/* the trainer stays signed in (no idle sign-out) – he signs out himself with "Wyloguj" */
 
 async function loadAll(){
   try {
@@ -786,7 +783,7 @@ if (!HZ.ready){ render(); return; }
 render();
 HZ.api.onAuth(session => {
   const was = A.session && A.session.user.id;
-  A.session = session; armIdle();
+  A.session = session;
   if (!session){ A.checked = false; A.profile = null; render(); return; }
   if (was !== session.user.id){ A.checked = false; render(); setTimeout(loadAll, 0); }
 });
