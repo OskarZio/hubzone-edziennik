@@ -39,7 +39,7 @@ HZ.makeConsent = (prev, patch) => ({ policy:HZ.POLICY_VERSION, at:new Date().toI
 const delWhere = async (field, val) => { const s = await db.collection("logs").where(field, "==", val).get(); for (const d of s.docs) await d.ref.delete(); return s.size; };
 HZ.api = {
   /* auth */
-  onAuth(cb){ auth.onAuthStateChanged(u => cb(u ? { user:{ id:u.uid, email:u.email || "", guest:!!u.isAnonymous } } : null)); },
+  onAuth(cb){ auth.onAuthStateChanged(u => { HZ.authKnown = true; cb(u ? { user:{ id:u.uid, email:u.email || "", guest:!!u.isAnonymous } } : null); }); },
   signOut: () => auth.signOut(),
   googleSignIn: async () => { const p = googleProvider();
     try { await auth.signInWithPopup(p); }
@@ -578,6 +578,10 @@ HZ.rest = (() => { let end = 0, total = 0, label = "", node, tick, ac, doneT;
     document.body.append(node); document.body.classList.add("resting"); HZ.buzz(15); draw(); tick = setInterval(draw, 250); };
   document.addEventListener("visibilitychange", () => { if (end && document.visibilityState === "visible") draw(); });
   return { start, stop, active: () => end > 0 }; })();
+/* first moments after opening: the phone is still restoring the saved login – show a placeholder, never the login form */
+HZ.authKnown = false;
+HZ.authWait = rerender => { if (!HZ.authWaitT) HZ.authWaitT = setTimeout(() => { HZ.authKnown = true; rerender(); }, 8000);
+  return el("div", { class:"auth-wait", role:"status", "aria-label":"Wczytuję…" }, el("span", { class:"spin", "aria-hidden":"true" }), el("span", { class:"small muted", text:"Wczytuję…" })); };
 HZ.fatiguePicker = (cur, onPick) => el("div", { class:"fatigue", role:"group", "aria-label":"Zmęczenie od 1 do 10" },
   Array.from({ length:10 }, (_,i) => i+1).map(n => el("button", { type:"button", "aria-pressed":String(cur === n), onclick(){ onPick(cur === n ? null : n); }, text:n })));
 HZ.loadInput = (ex, val, onVal, id) => {

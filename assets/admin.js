@@ -47,6 +47,7 @@ async function loadSettings(){ const r = await HZ.api.getClub(); if (r.error) th
 
 function view(){
   if (!HZ.ready) return [header(), ...HZ.setupNeeded()];
+  if (!A.session && !HZ.authKnown) return [header(), HZ.authWait(render)];
   if (!A.session) return [header(), el("div", { class:"auth" }, HZ.authView({ mode:A.authMode, allowRegister:false, onMode: m => { A.authMode = m; render(); },
     title: A.authMode === "login" ? "Panel trenera" : null, sub: A.authMode === "login" ? "Dostęp tylko dla kont z rolą trenera." : null }))];
   if (!A.checked) return [header(), el("div", { class:"empty", text:"Sprawdzam uprawnienia…" })];

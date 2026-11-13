@@ -64,6 +64,7 @@ async function loadAll(){
 
 function view(){
   if (!HZ.ready) return [header(), ...HZ.setupNeeded()];
+  if (!C.session && !HZ.authKnown) return [header(), HZ.authWait(render)];
   if (!C.session && C.authMode === "guest") return [header(), el("div", { class:"auth" }, guestForm(), HZ.platform() !== "desktop" ? HZ.installCard(render, { compact:true }) : null), HZ.footer()];
   if (!C.session) return [header(), el("div", { class:"auth" },
     C.authMode === "login" ? el("div", { class:"card guest-cta" }, el("div", { class:"stack", style:"gap:2px" }, el("h3", { text:"Pierwszy raz na zajęciach?" }),

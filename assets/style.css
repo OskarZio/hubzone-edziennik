@@ -696,3 +696,6 @@ body::before{content:"";position:fixed;left:0;right:0;top:0;height:env(safe-area
 @media (min-width:760px){.wprog{top:calc(env(safe-area-inset-top,0px) + 60px)}}
 .offline{top:calc(env(safe-area-inset-top,0px) + 6px)}
 @media (max-width:420px){ .tabs button{font-size:.68rem;letter-spacing:-.01em} }
+.auth-wait{display:flex;flex-direction:column;align-items:center;gap:12px;padding:64px 0}
+.spin{width:30px;height:30px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--accent);animation:hz-spin .8s linear infinite}
+@keyframes hz-spin{to{transform:rotate(360deg)}}
