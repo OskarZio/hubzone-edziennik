@@ -917,6 +917,7 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   const best = {}, bestReps = {}, bestLoad = {}, first = {}, records = {}, bests = {}, pending = [], nSess = {};
   const ref = opts.bw > 0 ? opts.bw : 75;   // body weight used for pull-ups/dips (75 kg if unknown – it's only compared with the same person)
   const pS = {}, pFirst = {}, pBest = {}, pBefore = {}, pIn = {}, pnIn = {}, pFirstIn = {};
+  const bTop = {}, bReps = {}, bCount = {};   // "pobicia": per exercise – heaviest effective load so far, best reps on each load, how many times the person beat themselves (in the period)
   let prs = 0, repPrs = 0, volume = 0, strength = 0;
   const since = opts.approveSince !== undefined ? opts.approveSince : HZ.apprOpts().approveSince;
   for (const l of sorted){
@@ -956,6 +957,14 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
           if (t === "kg") cv = Math.max(...done.map(x => HZ.e1rm((bwEx ? ref : 0) + (Number(x.load) || 0), x.reps)));
           else if (t === "band" && bwEx){ const ld = HZ.workLoad(e), bs = S.config.bands, bb = bs.find(b => b.id === ld); const eff = Math.max(1, ref - (ld === "none" || !bb ? 0 : HZ.bandKgMid(bb)));
             cv = HZ.e1rm(eff, Math.max(...done.map(x => x.reps || 0))); } }
+        /* Postęp = how many times you beat yourself: a heavier load (or weaker band) than ever, or more reps on your heaviest load.
+           The size of the jump doesn't matter, so +2,5 kg at 140 kg counts like +10 kg at 40 kg. Jumps waiting for the trainer don't count yet. */
+        if (cv > 0 && (t === "kg" || (t === "band" && bwEx))){ const id = e.exId; let eff, rp;
+          if (t === "kg"){ eff = (bwEx ? ref : 0) + top; rp = reps; }
+          else { const ld = HZ.workLoad(e), bb = S.config.bands.find(b => b.id === ld); eff = Math.max(1, ref - (ld === "none" || !bb ? 0 : HZ.bandKgMid(bb))); rp = reps; }
+          eff = Math.round(eff * 10) / 10; const rk = id + "|" + eff;
+          if (bTop[id] != null && (eff > bTop[id] || (eff === bTop[id] && rp > (bReps[rk] || 0))) && here) bCount[id] = (bCount[id] || 0) + 1;
+          bTop[id] = Math.max(bTop[id] ?? 0, eff); bReps[rk] = Math.max(bReps[rk] || 0, rp); }
         if (cv > 0){ const id = e.exId; pS[id] = (pS[id] || 0) + 1; if (pFirst[id] == null) pFirst[id] = cv; pBest[id] = Math.max(pBest[id] || 0, cv);
           if (from){ if ((l.date || "") >= from){ pnIn[id] = (pnIn[id] || 0) + 1; if (pFirstIn[id] == null) pFirstIn[id] = cv; pIn[id] = Math.max(pIn[id] || 0, cv); }
             else pBefore[id] = Math.max(pBefore[id] || 0, cv); } } }
@@ -979,9 +988,10 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
       const steps = prev ? pnIn[id] : pnIn[id] - 1; return Math.max(0, Math.min((pIn[id] - base) / base * 100, HZ.STEP_CAP * steps)); }   // no record beaten this month = 0%, never minus
     if (pS[id] < 2) return null; return Math.min((pBest[id] - pFirst[id]) / pFirst[id] * 100, HZ.STEP_CAP * (pS[id] - 1)); }).filter(x => x != null);
   const progress = gains.length ? Math.round(gains.reduce((a, b) => a + b, 0) / gains.length * 10) / 10 : null;
+  const beats = useIds.reduce((a, id) => a + (bCount[id] || 0), 0);
   if (!from) strength += Math.max(0, Math.min(HZ.PTS.progressCap, Math.round(progress || 0)));
   return {
-    workouts:attended.size, streak, longest, prs, repPrs, progress, volume: Math.round(volume),
+    workouts:attended.size, streak, longest, prs, repPrs, progress, beats, volume: Math.round(volume),
     points: attended.size * HZ.POINTS.workout + bonus, strength,
     attendancePct, records: Object.values(records), bests, assist, pending, calibrating
   };
@@ -1004,7 +1014,7 @@ HZ.progEx = (ex, prog) => { if (!ex || !prog || prog === "std") return ex; const
 HZ.monthKey = () => HZ.todayISO().slice(0, 7);
 HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
 /* full ranking row: all-time + this month */
-HZ.RANK_V = 5;
+HZ.RANK_V = 6;
 /* trainer: recalculate (and save) the ranking rows of everyone who agreed, from all their trainings; returns the fresh rows */
 HZ.rebuildRanking = async ({ users, logs, appr }) => {
   const r = await HZ.api.ranking(); const rows = (r && r.data) || [];
@@ -1036,7 +1046,7 @@ HZ.rankFull = (logs, appr, bw, birthYear, sex) => {
   for (const [id, pct] of Object.entries(relUse)){ const eff = pct * bwUse / 100; sc[id] = Math.round(eff * coef * af * 10); if (mainIds.has(id)){ sum += eff; n++; } }
   if (n) sc.main = Math.round(sum * coef * af * 10);
   if (est) sc.est = 1;
-  return { ...row, af, sc, m:{ k, points:m.points, workouts:m.workouts, prs:m.prs, progress:m.progress, rv:HZ.RANK_V } };
+  return { ...row, af, sc, m:{ k, points:m.points, workouts:m.workouts, prs:m.beats || 0, progress:m.progress, rv:HZ.RANK_V } };
 };
 /* relative strength: best working weight as % of body weight; bodyweight exercises (pull-ups, dips) count body + added load */
 HZ.isBwExercise = ex => ex ? (ex.bwBased ?? ex.type === "band") : false;
@@ -1052,24 +1062,25 @@ HZ.relStrength = (bests, bw, assist = {}) => { const out = {}; if (!(bw > 0)) re
   for (const [id, a] of Object.entries(assist || {})) if (out[id] == null) out[id] = Math.max(1, Math.round((bw - a) / bw * 100));
   return out; };
 /* what goes to the shared ranking: body weight itself never leaves the profile, only the percentages */
-HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, assist, pending, repPrs, calibrating, ...row } = st; return { ...row, bests: bests || {}, rel: HZ.relStrength(bests, bw, assist) }; };
+HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, assist, pending, repPrs, calibrating, beats, ...row } = st;
+  return { ...row, prs: beats || 0, bests: bests || {}, rel: HZ.relStrength(bests, bw, assist) }; };   // row.prs = "pobicia" (Postęp table); kept under the old field name so the database rules need no change
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
 const RANK_COLS = [
   ["points", "Punkty", r => r.points ?? 0],
   ["workouts", "Treningi", r => r.workouts ?? 0],
   ["streak", "Seria", r => r.streak ?? 0],
-  ["progress", "Postęp", r => r.progress == null ? "–" : (r.progress > 0 ? "+" : "") + String(r.progress).replace(".", ",") + "%"],
+  ["progress", "Postęp", r => !(r.prs > 0) && r.progress == null ? "–" : `${r.prs || 0} pkt` + (r.progress > 0 ? ` · +${String(r.progress).replace(".", ",")}%` : "")],
   ["volume", "Tonaż", r => fmtVol(r.volume || 0)]
 ];
 const BOARDS = [
   { key:"points", label:"Regularność", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
   { key:"rel", label:"Siła", desc:"Punkty siły = podniesiony ciężar × współczynnik masy ciała i płci (IPF GL, jak w trójboju) × mnożnik wieku. Przy podciąganiu i dipach liczy się masa ciała + dociążenie (na gumie: minus pomoc gumy). Dzięki temu lżejsi, cięższi, kobiety, mężczyźni i starsi rywalizują na równych zasadach. „Razem” to suma z bojów głównych, więc wygrywa najbardziej wszechstronny. Wagę, wiek i płeć widzi tylko zawodnik i trener." },
-  { key:"progress", label:"Postęp", desc:`Każdy porównywany wyłącznie sam ze sobą: o ile procent wzrosła Twoja siła (ciężar + powtórzenia) średnio w bojach głównych. Ogólny: od pierwszego treningu do najlepszego. Miesięczny: najlepszy wynik w tym miesiącu w porównaniu z najlepszym sprzed miesiąca – jeśli go jeszcze nie pobiłeś, masz 0% (nigdy na minusie). Liczy się najwyżej +${HZ.STEP_CAP}% za każdy kolejny trening z ćwiczeniem, więc duży skok na początku (szukanie ciężaru) nie wygrywa. Przy podciąganiu i dipach słabsza guma albo dociążenie też jest postępem. „–” = za mało treningów, żeby porównać (min. 2).` },
+  { key:"progress", label:"Postęp", desc:"Punkt za każde pobicie samego siebie w boju głównym: większy ciężar (albo słabsza guma) niż kiedykolwiek wcześniej albo więcej powtórzeń na swoim najwyższym ciężarze. Wielkość skoku nie ma znaczenia – +2,5 kg liczy się tak samo jak +10 kg – więc wygrywa ten, kto najczęściej robi krok do przodu, a nie ten, kto zaczynał najniżej. Przy remisie decyduje procent wzrostu siły (pokazany obok). Pierwszy trening z ćwiczeniem to punkt wyjścia. Miesięczny: pobicia z tego miesiąca. Duże skoki liczą się po zatwierdzeniu przez trenera." }
 ];
 let rankSort = "points", relEx = null, rankPeriod = "month";
 HZ.rankMonth = (key = "points") => { rankPeriod = "month"; rankSort = key; if (key === "adj") relEx = "main"; };
-const MONTH_KEYS = ["points", "workouts", "progress"];
+const MONTH_KEYS = ["points", "workouts", "progress", "prs"];
 /* motivating line for the participant (monthly general board) */
 HZ.myRankMessage = (rows, meId) => {
   const k = HZ.monthKey(), pts = r => r.m && r.m.k === k ? (r.m.points || 0) : 0;
@@ -1110,7 +1121,7 @@ HZ.monthCrown = (rows, meId, onOpen) => {
   const cats = [
     { key:"points", ico:"📅", label:"Regularność", val:r => mine(r).points || 0, txt:v => `${v} pkt` },
     { key:"adj", ico:"💪", label:"Siła", val:r => (r.sc && r.sc.main) || 0, txt:v => `${HZ.fmtKg(v)} pkt` },
-    { key:"progress", ico:"📈", label:"Postęp", val:r => mine(r).progress || 0, txt:v => `+${String(v).replace(".", ",")}%` }
+    { key:"progress", ico:"📈", label:"Postęp", val:r => mine(r).prs > 0 ? mine(r).prs * 1000 + Math.max(0, Math.min(999, mine(r).progress || 0)) : 0, txt:v => `${Math.floor(v / 1000)} pkt` }
   ].map(c => { const best = Math.max(0, ...vis.map(c.val)); return { ...c, best, kings: best > 0 ? vis.filter(r => c.val(r) === best).sort((a, b) => (a.name || "").localeCompare(b.name || "", "pl")) : [] }; });
   const mon = HZ.monthName(k).split(" ")[0], Mon = mon[0].toUpperCase() + mon.slice(1);
   const open = key => onOpen ? e => { e.stopPropagation(); onOpen(key); } : null;
@@ -1167,11 +1178,12 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const adjCol = ["adj", "Punkty siły", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" + (scOf(r).est ? "*" : "") : "–"];
   const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
   const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (k === "progress" ? (r.m.progress == null ? null : Math.max(0, r.m.progress)) : (r.m[k] || 0)) : (k === "progress" ? null : 0)) : r[k];
-  const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l, f]) => [k, l, r => f({ ...r, [k]: field(r, k) })]) : RANK_COLS;
+  const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l, f]) => [k, l, r => f({ ...r, [k]: field(r, k), prs: field(r, "prs") })]) : RANK_COLS;
+  const progVal = r => { const bt = field(r, "prs") || 0, pc = field(r, "progress"); return !bt && pc == null ? -Infinity : bt * 1000 + Math.max(0, Math.min(999, pc || 0)); };   // beats first, % breaks ties
   // the sorted column comes right after the name, so it is visible on a phone
   const ordered = c => { const i = c.findIndex(x => x[0] === rankSort); return i > 0 ? [c[i], ...c.slice(0, i), ...c.slice(i + 1)] : c; };
   const cols = strengthView ? [adjCol, relCol, kgCol] : ordered(baseCols);
-  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "adj" ? (adjOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : (field(r, rankSort) == null ? -Infinity : field(r, rankSort));
+  const val = r => rankSort === "rel" ? (relOf(r) ?? -Infinity) : rankSort === "adj" ? (adjOf(r) ?? -Infinity) : rankSort === "kg" ? (kgOf(r) ?? -Infinity) : rankSort === "progress" ? progVal(r) : (field(r, rankSort) == null ? -Infinity : field(r, rankSort));
   const sorted = [...vis].sort((a,b) => val(b) - val(a) || ((field(b, "points")||0) - (field(a, "points")||0)) || (a.name || "").localeCompare(b.name || "", "pl"));
   let place = 0, prev;
   const placed = sorted.map((r, i) => { if (val(r) !== prev){ place = i + 1; prev = val(r); } return { r, place: val(r) === -Infinity ? "–" : place }; });
@@ -1207,7 +1219,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
           el("td", {}, typeof place === "number" && place <= 3 ? HZ.medal(place, true) : String(place)), el("td", {}, el("span", { class:"rk-name" }, HZ.avatar(r, "av av-sm"), el("span", { text:(r.name || "Uczestnik") + (r.hidden ? " (ukryty)" : "") }))),
           cols.map(([k,, f]) => el("td", { class: k === rankSort ? "on" : null, text:f(r) }))))))),
       strengthView ? el("p", { class:"small muted", text:"* wynik szacunkowy – brak wpisanej wagi lub płci (liczony dla przeciętnej wagi); wpisz je w Konto, żeby był dokładny. Punkty siły: ciężar × współczynnik masy ciała i płci (IPF GL) × wiek – wymagają wpisanej wagi i płci (Konto). % MC: ciężar jako procent masy ciała; przy podciąganiu i dipach „MC +X%” = masa ciała + X% dociążenia. Ciężar: najlepszy ciężar roboczy (Razem: suma). Kliknij nagłówek kolumny, żeby zmienić sortowanie." }) :
-el("p", { class:"small muted", text:`Punkty: za regularność (trening z grupą + seria piątków z rzędu). Postęp: o ile % wzrosła Twoja siła (ciężar + powtórzenia) w bojach głównych – maks. +${HZ.STEP_CAP}% za każdy kolejny trening; „–” = za mało treningów (min. 2). Seria: piątki z rzędu. Tonaż: ciężar × powtórzenia. Kliknij nagłówek kolumny, żeby zmienić sortowanie.` }))];
+el("p", { class:"small muted", text:`Punkty: za regularność (trening z grupą + seria piątków z rzędu). Postęp: punkt za każde pobicie siebie w boju głównym (większy ciężar, słabsza guma albo więcej powtórzeń na najwyższym ciężarze); przy remisie decyduje % wzrostu siły. Seria: piątki z rzędu. Tonaż: ciężar × powtórzenia. Kliknij nagłówek kolumny, żeby zmienić sortowanie.` }))];
 };
 
 /* individual stats card (client: Postępy; trainer: client history) */
