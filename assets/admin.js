@@ -79,7 +79,16 @@ function body(){
       const why = !cs.ranking ? (c.manual ? "brak zgody – zaznacz ją w karcie klienta (Klienci → imię)" : "nie włączył/-a rankingu – w aplikacji: Konto → „Pokazuj mnie w rankingu”")
         : !n ? "zgoda jest, ale nie ma jeszcze żadnego treningu" : "zgoda jest – kliknij Odśwież";
       return { c, why }; });
+    // people whose strength points are only an estimate (no sex / body weight) – this is where women and lighter people lose the most
+    const gaps = A.clients.filter(c => inRank.has(c.id)).map(c => { const cs = c.consent || {};
+      const why = [c.sex ? null : "płeć", c.bodyweight ? null : (cs.health || c.manual ? "masa ciała" : "masa ciała (klient musi zaznaczyć zgodę na dane o zdrowiu w Konto albo podać Ci ją ustnie)")].filter(Boolean);
+      return why.length ? { c, why } : null; }).filter(Boolean);
     return [...HZ.rankingView(A.rankRows, null, render, { showHidden:true }),
+      gaps.length ? el("div", { class:"card" }, el("h3", { text:`Wynik siły tylko szacunkowy (${gaps.length})` }),
+        el("p", { class:"small muted", text:"Tym osobom brakuje płci lub masy ciała, więc ich punkty siły liczą się średnim przelicznikiem (oznaczone *). Najwięcej tracą na tym kobiety i lżejsze osoby. Uzupełnij dane w karcie klienta albo poproś, żeby wpisali je sami (Konto)." }),
+        el("div", { class:"list" }, gaps.map(({ c, why }) => el("div", { class:"row between", style:"flex-wrap:nowrap;gap:8px" },
+          el("span", {}, el("b", { text:c.name || "Klient" }), el("span", { class:"small muted", text:" – brak: " + why.join(", ") })),
+          el("button", { class:"ghost small", style:"flex:none", onclick(){ A.tab = "clients"; HZ.LS.set("hz-admin-tab", "clients"); openClient(c.id); }, text:"Uzupełnij →" }))))) : null,
       missing.length ? el("div", { class:"card" }, el("h3", { text:`Nie ma w rankingu (${missing.length})` }),
         el("p", { class:"small muted", text:"Ranking pokazuje tylko osoby, które się na to zgodziły (RODO). Klient z kontem włącza to sam; za klienta bez konta zaznaczasz zgodę Ty." }),
         el("div", { class:"list" }, missing.map(({ c, why }) => el("div", { class:"row between", style:"flex-wrap:nowrap" },

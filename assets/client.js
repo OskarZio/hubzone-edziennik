@@ -156,8 +156,12 @@ function crown(){
 }
 function rankingTab(){
   if (!C.rankRows){ loadRanking(); return [HZ.skeleton(2)]; }
-  const prompt = C.profile && C.profile.bodyweight && C.profile.sex ? null : bwForm("Wpisz swoją masę ciała, żeby pojawić się w rankingu siły względnej. Inni zobaczą tylko procenty.");
-  return HZ.rankingView(C.rankRows, C.session.user.id, render, { relPrompt:prompt, message:HZ.myRankMessage(C.rankRows, C.session.user.id) });
+  const lack = [C.profile && C.profile.sex ? null : "płci", C.profile && C.profile.bodyweight ? null : "masy ciała"].filter(Boolean);
+  const prompt = lack.length ? bwForm(`Brakuje: ${lack.join(" i ")}. Bez tego Twoje punkty siły są liczone „na oko” (średnia dla obu płci i 75 kg) i mogą być zaniżone – szczególnie u kobiet i lżejszych osób. Inni zobaczą tylko punkty, nie Twoją wagę.`) : null;
+  const inRank = C.rankRows.some(r => r.id === C.session.user.id);
+  const nudge = lack.length && inRank ? el("div", { class:"notice warn small", role:"status" }, el("b", { text:"Twój wynik siły jest szacunkowy (*). " }), `Uzupełnij ${lack.map(x => x === "płci" ? "płeć" : "masę ciała").join(" i ")} – wtedy rywalizujesz na równych zasadach. `,
+    el("button", { type:"button", class:"link", onclick(){ HZ.rankMonth("adj"); render(); setTimeout(() => { const n = document.getElementById("acc-bw"); if (n) n.scrollIntoView({ block:"center" }); }, 60); }, text:"Uzupełnij teraz" })) : null;
+  return [nudge, ...HZ.rankingView(C.rankRows, C.session.user.id, render, { relPrompt:prompt, message:HZ.myRankMessage(C.rankRows, C.session.user.id) })];
 }
 function body(){
   if (C.tab !== "today") wake(false);
