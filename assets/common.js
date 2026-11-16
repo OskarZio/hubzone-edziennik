@@ -976,7 +976,7 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   const ids = Object.keys(pS); const useIds = ids.some(id => mainIds.has(id)) ? ids.filter(id => mainIds.has(id)) : ids;
   const gains = useIds.map(id => {
     if (from){ if (!pnIn[id]) return null; const prev = pBefore[id], base = prev || (pnIn[id] >= 2 ? pFirstIn[id] : null); if (!base) return null;
-      const steps = prev ? pnIn[id] : pnIn[id] - 1; return Math.max(-50, Math.min((pIn[id] - base) / base * 100, HZ.STEP_CAP * steps)); }
+      const steps = prev ? pnIn[id] : pnIn[id] - 1; return Math.max(0, Math.min((pIn[id] - base) / base * 100, HZ.STEP_CAP * steps)); }   // no record beaten this month = 0%, never minus
     if (pS[id] < 2) return null; return Math.min((pBest[id] - pFirst[id]) / pFirst[id] * 100, HZ.STEP_CAP * (pS[id] - 1)); }).filter(x => x != null);
   const progress = gains.length ? Math.round(gains.reduce((a, b) => a + b, 0) / gains.length * 10) / 10 : null;
   if (!from) strength += Math.max(0, Math.min(HZ.PTS.progressCap, Math.round(progress || 0)));
@@ -1004,7 +1004,7 @@ HZ.progEx = (ex, prog) => { if (!ex || !prog || prog === "std") return ex; const
 HZ.monthKey = () => HZ.todayISO().slice(0, 7);
 HZ.monthName = k => { const [y, m] = (k || HZ.monthKey()).split("-"); return ["styczeń","luty","marzec","kwiecień","maj","czerwiec","lipiec","sierpień","wrzesień","październik","listopad","grudzień"][Number(m) - 1] + " " + y; };
 /* full ranking row: all-time + this month */
-HZ.RANK_V = 4;
+HZ.RANK_V = 5;
 /* trainer: recalculate (and save) the ranking rows of everyone who agreed, from all their trainings; returns the fresh rows */
 HZ.rebuildRanking = async ({ users, logs, appr }) => {
   const r = await HZ.api.ranking(); const rows = (r && r.data) || [];
@@ -1065,7 +1065,7 @@ const RANK_COLS = [
 const BOARDS = [
   { key:"points", label:"Regularność", desc:`Za regularność, nie za ciężar: ${HZ.POINTS.workout} pkt za każdy trening z grupą i +${HZ.POINTS.streak} pkt za każdy kolejny piątek z rzędu.` },
   { key:"rel", label:"Siła", desc:"Punkty siły = podniesiony ciężar × współczynnik masy ciała i płci (IPF GL, jak w trójboju) × mnożnik wieku. Przy podciąganiu i dipach liczy się masa ciała + dociążenie (na gumie: minus pomoc gumy). Dzięki temu lżejsi, cięższi, kobiety, mężczyźni i starsi rywalizują na równych zasadach. „Razem” to suma z bojów głównych, więc wygrywa najbardziej wszechstronny. Wagę, wiek i płeć widzi tylko zawodnik i trener." },
-  { key:"progress", label:"Postęp", desc:`Każdy porównywany wyłącznie sam ze sobą: o ile procent wzrosła Twoja siła (ciężar + powtórzenia) średnio w bojach głównych. Ogólny: od pierwszego treningu do najlepszego. Miesięczny: najlepszy wynik w tym miesiącu w porównaniu z najlepszym sprzed miesiąca. Liczy się najwyżej +${HZ.STEP_CAP}% za każdy kolejny trening z ćwiczeniem, więc duży skok na początku (szukanie ciężaru) nie wygrywa. Przy podciąganiu i dipach słabsza guma albo dociążenie też jest postępem. „–” = za mało treningów, żeby porównać (min. 2).` },
+  { key:"progress", label:"Postęp", desc:`Każdy porównywany wyłącznie sam ze sobą: o ile procent wzrosła Twoja siła (ciężar + powtórzenia) średnio w bojach głównych. Ogólny: od pierwszego treningu do najlepszego. Miesięczny: najlepszy wynik w tym miesiącu w porównaniu z najlepszym sprzed miesiąca – jeśli go jeszcze nie pobiłeś, masz 0% (nigdy na minusie). Liczy się najwyżej +${HZ.STEP_CAP}% za każdy kolejny trening z ćwiczeniem, więc duży skok na początku (szukanie ciężaru) nie wygrywa. Przy podciąganiu i dipach słabsza guma albo dociążenie też jest postępem. „–” = za mało treningów, żeby porównać (min. 2).` },
 ];
 let rankSort = "points", relEx = null, rankPeriod = "month";
 HZ.rankMonth = (key = "points") => { rankPeriod = "month"; rankSort = key; if (key === "adj") relEx = "main"; };
@@ -1166,7 +1166,7 @@ HZ.rankingView = (rows, meId, rerender, opts = {}) => {
   const adjOf = r => { const sc = scOf(r); return (relEx === "main" ? sc.main : sc[relEx]) ?? null; };
   const adjCol = ["adj", "Punkty siły", r => adjOf(r) != null ? HZ.fmtKg(adjOf(r)) + " pkt" + (scOf(r).est ? "*" : "") : "–"];
   const monthMode = rankPeriod === "month" && !strengthView, mk = HZ.monthKey();
-  const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (k === "progress" ? (r.m.progress ?? null) : (r.m[k] || 0)) : (k === "progress" ? null : 0)) : r[k];
+  const field = (r, k) => monthMode && MONTH_KEYS.includes(k) ? (r.m && r.m.k === mk ? (k === "progress" ? (r.m.progress == null ? null : Math.max(0, r.m.progress)) : (r.m[k] || 0)) : (k === "progress" ? null : 0)) : r[k];
   const baseCols = monthMode ? RANK_COLS.filter(c => MONTH_KEYS.includes(c[0])).map(([k, l, f]) => [k, l, r => f({ ...r, [k]: field(r, k) })]) : RANK_COLS;
   // the sorted column comes right after the name, so it is visible on a phone
   const ordered = c => { const i = c.findIndex(x => x[0] === rankSort); return i > 0 ? [c[i], ...c.slice(0, i), ...c.slice(i + 1)] : c; };
