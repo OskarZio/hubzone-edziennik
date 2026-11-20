@@ -909,7 +909,7 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   for (let i = pastAll.length - 1; i >= 0; i--){ if (attendedAll.has(pastAll[i].id)) streak++; else if (pastAll[i].date === today) continue; else break; }
   const pastAttended = past.filter(w => attended.has(w.id)).length;
   const possible = firstIdx < 0 ? 0 : past.length - firstIdx - (past.length && past[past.length-1].date === today && !attended.has(past[past.length-1].id) ? 1 : 0);
-  const attendancePct = possible > 0 ? Math.round(pastAttended / possible * 100) : null;
+  const attendancePct = possible > 0 ? Math.round(pastAttended / possible * 100) : null;   // counted from the person's first training, not from the club's first
   /* records (working sets only)
      - calibration: the first HZ.CALIB sessions of an exercise are for finding the weight – no records, no progress; the best of them is the start
      - weight exercises: a record is a higher estimated max (1RM, Epley), so 60×10 beats 65×5 and more reps on the same weight count too
@@ -993,7 +993,7 @@ HZ.computeStats = (logs, appr = {}, opts = {}) => {
   return {
     workouts:attended.size, streak, longest, prs, repPrs, progress, beats, volume: Math.round(volume),
     points: attended.size * HZ.POINTS.workout + bonus, strength,
-    attendancePct, records: Object.values(records), bests, assist, pending, calibrating
+    attendancePct, attendedN:pastAttended, possibleN:possible, records: Object.values(records), bests, assist, pending, calibrating
   };
 };
 /* entries the trainer rejected don't drive the next suggestion */
@@ -1062,7 +1062,7 @@ HZ.relStrength = (bests, bw, assist = {}) => { const out = {}; if (!(bw > 0)) re
   for (const [id, a] of Object.entries(assist || {})) if (out[id] == null) out[id] = Math.max(1, Math.round((bw - a) / bw * 100));
   return out; };
 /* what goes to the shared ranking: body weight itself never leaves the profile, only the percentages */
-HZ.rankRow = (st, bw) => { const { records, attendancePct, bests, assist, pending, repPrs, calibrating, beats, ...row } = st;
+HZ.rankRow = (st, bw) => { const { records, attendancePct, attendedN, possibleN, bests, assist, pending, repPrs, calibrating, beats, ...row } = st;
   return { ...row, prs: beats || 0, bests: bests || {}, rel: HZ.relStrength(bests, bw, assist) }; };   // row.prs = "pobicia" (Postęp table); kept under the old field name so the database rules need no change
 
 const fmtVol = v => v >= 1000 ? (v / 1000).toLocaleString("pl-PL", { maximumFractionDigits:1 }) + " t" : v + " kg";
@@ -1259,7 +1259,7 @@ HZ.personalStats = (logs, title, appr = {}) => {
   return el("div", { class:"card" },
     el("h2", { text:title }),
     el("div", { class:"grid3" },
-      tile("Treningi z grupą", st.workouts, st.attendancePct == null ? null : `${st.attendancePct}% obecności`),
+      tile("Treningi z grupą", st.workouts, st.attendancePct == null ? null : `${st.attendancePct}% obecności (${st.attendedN} z ${st.possibleN} od Twojego pierwszego treningu)`),
       tile("Seria", st.streak, `najdłuższa: ${st.longest}`),
       tile("Rekordy", st.prs, (st.repPrs ? `+${st.repPrs} w powt. · ` : "") + (st.progress == null ? "" : `progres ${st.progress > 0 ? "+" : ""}${st.progress}%`) || null),
       tile("Pkt ogólne", st.points),

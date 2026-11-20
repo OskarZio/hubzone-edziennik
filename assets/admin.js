@@ -408,8 +408,10 @@ function announceCard(){
 /* ---------- client card: everything about one person on one screen ---------- */
 function clientSummary(c){
   const logs = (A.allLogs || []).filter(l => l.user_id === c.id), club = logs.filter(l => !l.own && l.workout_id), since = (c.created_at || "").slice(0, 10) || (club[0] || {}).date || "";
-  const mine = new Set(club.map(l => l.workout_id)), past = HZ.sortedWorkouts().filter(w => (w.date < HZ.todayISO() || mine.has(w.id)) && (!since || w.date >= since));
-  const freq = past.length ? Math.round(club.filter(l => past.some(w => w.id === l.workout_id)).length / past.length * 100) : null;
+  // attendance counted from the person's first training with the group (same rule as the client sees)
+  const since0 = club.map(l => l.date).filter(Boolean).sort()[0] || since;
+  const mine = new Set(club.map(l => l.workout_id)), past = HZ.sortedWorkouts().filter(w => (w.date < HZ.todayISO() || mine.has(w.id)) && (!since0 || w.date >= since0));
+  const nIn = past.filter(w => mine.has(w.id)).length, freq = past.length ? Math.round(nIn / past.length * 100) : null;
   const last = logs.map(l => l.date).sort().pop(), pains = logs.filter(l => l.pain).sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 3);
   let run = 0; for (const w of [...past].reverse()){ if (mine.has(w.id)) run++; else break; }
   const tops = S.config.exercises.map(ex => { const h = HZ.history(logs, ex.id, null, "kg"); if (!h.length) return null; const best = Math.max(...h.map(x => Math.max(0, ...x.entry.sets.map(s => typeof s.load === "number" ? s.load : 0))));
@@ -418,7 +420,7 @@ function clientSummary(c){
   return el("div", { class:"card" }, el("div", { class:"row", style:"flex-wrap:nowrap;gap:12px" }, HZ.avatar(c, "av av-lg"), el("div", { class:"stack", style:"gap:2px" }, el("h2", { text:c.name || "Klient" }), el("span", { class:"small muted", text: since ? `w klubie od ${HZ.fmtDate(since)}` : "" }))),
     el("div", { class:"ccard-grid" },
       el("div", {}, el("span", { class:"small muted", text:"Treningi" }), el("b", { text:String(club.length) })),
-      el("div", {}, el("span", { class:"small muted", text:"Frekwencja" }), el("b", { text: freq == null ? "–" : freq + "%" })),
+      el("div", {}, el("span", { class:"small muted", text:"Frekwencja" }), el("b", { text: freq == null ? "–" : freq + "%" }), freq == null ? null : el("span", { class:"small muted", text:`${nIn} z ${past.length} zajęć od ${HZ.fmtDate(since0)}` })),
       el("div", {}, el("span", { class:"small muted", text:"Z rzędu" }), el("b", { text:String(run) })),
       el("div", {}, el("span", { class:"small muted", text:"Ostatnio" }), el("b", { style:"font-size:1rem", text: last ? HZ.fmtDate(last) : "–" }))),
     tops.length ? el("p", { class:"small", text:"Najlepsze ciężary: " + tops.join(" · ") }) : null,
